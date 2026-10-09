@@ -292,7 +292,8 @@ class PreviewSpeedTests(unittest.TestCase):
             self.assertNotEqual(baseline['hash'],slow['hash'])
             for value in (25,150,200,300):
                 self.prepare(c,speed_percent=value)
-            self.assertLessEqual(max(speeds(c.job['code'])),2200)
+            self.assertLessEqual(max(speeds(c.job['code'])),5000)
+            self.assertGreater(max(speeds(c.job['code'])),2200)
             for value in (0,24,301,True,float('nan'),float('inf')):
                 with self.assertRaises(ValueError):
                     self.prepare(c,speed_percent=value)

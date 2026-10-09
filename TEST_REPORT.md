@@ -34,3 +34,7 @@
 ## Umbruch, Simulation, Stiftwechsel und Tempo
 
 27 automatisierte Tests bestanden. Zeilenumbruch nach gemessener Glyphenbreite statt Zeichenzahl (längste Zeile füllt mindestens 85 % der Breite, nie über den rechten Rand). Server startet immer live; Simulation nur über „Ohne Roboter testen“ oder `--demo`. Berührende Striche werden ohne Stiftwechsel gezeichnet (Beispielgedicht 109 → 77 Stiftwechsel, Brieftext 136 → 85), in allen Stilen und Größen; i-Punkte und Kreuzungen bleiben getrennt. Stiftpause einstellbar (Standard 300 ms statt 450 ms), Tempo bis 300 % bei Vorschubgrenze 2200 mm/min. Geschätzte Dauer Beispielgedicht A6: vorher 2:16 min (150 %), jetzt 1:29 min (150 %, 300 ms) bzw. 0:56 min (300 %, 150 ms). Stiftpause unter 450 ms und Tempo über 150 % sind am Gerät noch nicht geprüft.
+
+## Gerätelimits
+
+Mit `$$` am VG-X4 ausgelesen (nur lesend, keine Bewegung): `$110`/`$111` = 5000 mm/min, `$120`/`$121` = 400 mm/s², `$11` = 0,1 mm, `$32` = 0 (kein Lasermodus, Stiftwechsel stoppen die Bewegung). Vorschubgrenze von 2200 auf 5000 mm/min angehoben, Profilbeschleunigung oberhalb 100 % bis 400 mm/s². G-Code bis 100 % bitgenau unverändert. Beispielgedicht A6 bei 300 % und 200 ms: 1:04 → 0:53 min geschätzt. 28 Tests bestanden. Tempo über 150 % am Gerät noch nicht geprüft.

@@ -17,7 +17,10 @@ from core.stroke_fonts import DEFAULT_FONT, FONT_CHOICES, get_stroke_font
 from humanizer.velocity_profile import compute_dynamic_feedrate
 
 XY_WORKSPACE = (310.0, 256.0)  # hardware manual, mm
-MAX_FEED = 2200  # mm/min; faster speed settings are capped here instead of rejected
+# Firmware limits read from the VG-X4 with $$ on 2026-10-09: $110/$111 = 5000 mm/min, $120/$121 = 400 mm/s².
+MAX_FEED = 5000  # mm/min; faster speed settings are capped here instead of rejected
+MAX_ACCEL = 400.0  # mm/s²
+BASE_ACCEL = 220.0  # mm/s² at 100 %, the tested writing profile
 SUPPORTED = set(chr(c) for c in range(32, 127)) | set('ÄÖÜäöüß')
 # Typographic characters from word processors map onto the ASCII glyphs of the stroke font.
 TYPOGRAPHIC = str.maketrans({**dict.fromkeys('„“”«»″', '"'), **dict.fromkeys('‚‘’‹›′´', "'"),
@@ -267,9 +270,10 @@ def create_gcode(strokes, cfg:VGX4Settings, dry_run:bool=False):
         if not dry_run: lines +=[f'M3 S{cfg.pen_down_s}',f'G4 P{dwell:.3f}']
         # Arc-length/curvature-aware speed with forward/back acceleration limits.
         # Slows in tight turns instead of a near-constant feed for all strokes.
+        # Above 100 % the ramps steepen too, or short letter strokes never reach the faster feed.
         feeds = compute_dynamic_feedrate(s, min_feed=style['min_feed']*speed,
                                          max_feed=min(MAX_FEED,style['max_feed']*speed),
-                                         max_accel_mm_s2=220.0)
+                                         max_accel_mm_s2=min(MAX_ACCEL,BASE_ACCEL*max(1.,speed)))
         for i,(x,y) in enumerate(s[1:],1):
             v=int(round(feeds[i]))
             lines.append(f'G1 X{x:.2f} Y{y:.2f} F{v}')
