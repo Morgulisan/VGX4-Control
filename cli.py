@@ -12,16 +12,16 @@ def _assert_finite_points(pts, stage_name="geometry"):
             raise ValueError(f"Non-finite coordinate in {stage_name}: {p}")
 
 def generate_humanized_strokes_and_feeds(
-    text, 
-    jitter=0.15, 
-    drift=0.35, 
-    scale=3.0, 
-    line_height=3.0, 
-    origin_x=10.0, 
+    text,
+    jitter=0.15,
+    drift=0.35,
+    scale=3.0,
+    line_height=3.0,
+    origin_x=10.0,
     origin_y=10.0,
     page_width=297.0,
     page_height=210.0,
-    min_feed=800, 
+    min_feed=800,
     max_feed=2400,
     max_accel=300.0,
     seed=None,
@@ -64,7 +64,7 @@ def generate_humanized_strokes_and_feeds(
 
     generator = StrokeGenerator(char_spacing=char_spacing, word_spacing=word_spacing, line_height=line_height, seed=seed)
     lines = text.split('\n')
-    
+
     # 1. Stroke-Generierung der Zeilen
     raw_lines_strokes = []
     current_line_y = 0.0
@@ -73,7 +73,7 @@ def generate_humanized_strokes_and_feeds(
             current_line_y -= line_height
             continue
         raw_strokes = generator.generate_text(line, start_x=0.0, start_y=current_line_y)
-        
+
         line_strokes = []
         for stroke in raw_strokes:
             if stroke.pen_down and stroke.points:
@@ -81,7 +81,7 @@ def generate_humanized_strokes_and_feeds(
                 scaled_pts = [(p[0] * scale, p[1] * scale) for p in stroke.points]
                 _assert_finite_points(scaled_pts, "scaled_pts")
                 line_strokes.append(scaled_pts)
-        
+
         # Drift in mm mit reproduzierbarem line_seed
         line_seed = (seed + line_idx * 1009) if seed is not None else None
         line_drifted = add_line_level_drift(line_strokes, drift_amount=drift, seed=line_seed)
@@ -94,12 +94,12 @@ def generate_humanized_strokes_and_feeds(
     all_raw_pts = [p for line in raw_lines_strokes for stroke in line for p in stroke]
     if not all_raw_pts:
         return [], [], False
-        
+
     _assert_finite_points(all_raw_pts, "all_raw_pts")
     drawn_min_x = min(p[0] for p in all_raw_pts)
     min_raw_x = min(0.0, drawn_min_x)
     min_raw_y = min(p[1] for p in all_raw_pts)
-    
+
     # Normalisierung auf positive Arbeitskoordinaten (Origin), preserving leading indentation
     shift_x = origin_x - min_raw_x
     shift_y = origin_y - min_raw_y
@@ -114,18 +114,18 @@ def generate_humanized_strokes_and_feeds(
             # Verschiebung in positive Arbeitsraumkoordinaten
             positioned_pts = [(p[0] + shift_x, p[1] + shift_y) for p in stroke]
             _assert_finite_points(positioned_pts, "positioned_pts")
-            
+
             # WICHTIG: Dynamic Feedrate VOR dem Jitter auf der echten Krümmungsgeometrie berechnen!
             feeds = compute_dynamic_feedrate(positioned_pts, min_feed=min_feed, max_feed=max_feed, max_accel_mm_s2=max_accel)
             for f_val in feeds:
                 if not math.isfinite(f_val):
                     raise ValueError(f"Non-finite feedrate generated: {f_val}")
-            
+
             # Jetzt erst stochastischen Mikro-Jitter mit räumlicher Bogenlänge aufbringen
             stroke_seed = (seed + stroke_counter * 389) if seed is not None else None
             jittered_pts = add_micro_jitter(positioned_pts, max_jitter=jitter, wavelength_mm=3.0, seed=stroke_seed)
             _assert_finite_points(jittered_pts, "jittered_pts")
-            
+
             all_final_strokes.append(jittered_pts)
             all_feedrates.append(feeds)
 
@@ -145,7 +145,7 @@ def generate_humanized_strokes_and_feeds(
     print(f"  X: {final_min_x:.2f} mm bis {final_max_x:.2f} mm (Breite: {final_max_x - final_min_x:.2f} mm)")
     print(f"  Y: {final_min_y:.2f} mm bis {final_max_y:.2f} mm (Hoehe: {final_max_y - final_min_y:.2f} mm)")
     print(f"  Papier-Begrenzung: {page_width} x {page_height} mm")
-    
+
     is_out_of_bounds = False
     if final_min_x < 0 or final_min_y < 0:
         print("  [WARNUNG] Negative Koordinaten vorhanden!")
@@ -161,11 +161,11 @@ def generate_humanized_strokes_and_feeds(
 
 def main():
     parser = argparse.ArgumentParser(description="Universal GCode Writer & CLI Tool for Pen Plotters")
-    
+
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument('-t', '--text', type=str, help="Text string to generate GCode for (supports \\n)")
     input_group.add_argument('-f', '--file', type=str, help="Path to text file to generate GCode for")
-    
+
     parser.add_argument('-o', '--output', type=str, required=True, help="Output .gcode file path")
     parser.add_argument('-m', '--mode', type=str, choices=['servo', 'stepper'], default=None, help="Z-axis motion mode (servo or stepper)")
     parser.add_argument('--pen-control', type=str, choices=['marlin-servo', 'grbl-pwm', 'stepper-z'], default=None,
@@ -173,21 +173,21 @@ def main():
     parser.add_argument('--servo-index', type=int, default=0, help="Servo index for Marlin M280 P<index> (default: 0)")
     parser.add_argument('--servo-pin', type=int, default=None, help="Deprecated alias for --servo-index")
     parser.add_argument('--firmware', type=str, choices=['marlin', 'grbl'], default='marlin', help="Controller firmware for dwell units (marlin=ms, grbl=seconds)")
-    
+
     # Travel & Motion
     parser.add_argument('--travel-mode', type=str, choices=['controlled', 'rapid'], default='controlled',
                         help="Travel motion mode ('controlled'=G1 with feedrate, 'rapid'=G0)")
     parser.add_argument('--travel-feed', type=int, default=3000, help="Feedrate for controlled travel moves (mm/min)")
     parser.add_argument('--park-x', type=float, default=None, help="Safe park X coordinate in mm at end of job")
     parser.add_argument('--park-y', type=float, default=None, help="Safe park Y coordinate in mm at end of job")
-    
+
     # Workspace & Bounds
     parser.add_argument('--origin-x', type=float, default=20.0, help="X origin offset in mm (margin from left edge)")
     parser.add_argument('--origin-y', type=float, default=20.0, help="Y origin offset in mm (margin from bottom edge)")
     parser.add_argument('--page-width', type=float, default=297.0, help="Plotter paper width in mm (default A4 landscape 297mm)")
     parser.add_argument('--page-height', type=float, default=210.0, help="Plotter paper height in mm (default A4 landscape 210mm)")
     parser.add_argument('--allow-out-of-bounds', action='store_true', help="Allow generation even if text exceeds workspace bounds")
-    
+
     # Speeds & Motion
     parser.add_argument('--feedrate', type=int, default=3000, help="Default travel feedrate (mm/min)")
     parser.add_argument('--min-feed', type=int, default=800, help="Minimum feedrate in sharp corners (mm/min)")
@@ -197,7 +197,7 @@ def main():
     parser.add_argument('--servo-delay', type=int, default=150, help="Dwell time in ms after pen touchdown (alias for --servo-down-delay)")
     parser.add_argument('--servo-down-delay', type=int, default=None, help="Dwell time in ms after pen touchdown (default: 150)")
     parser.add_argument('--servo-up-delay', type=int, default=120, help="Dwell time in ms after pen lift before travel (default: 120)")
-    
+
     # Humanization, Scaling & Seed
     parser.add_argument('--seed', type=int, default=None, help="Random seed for reproducible jitter and drift")
     parser.add_argument('--jitter', type=float, default=0.15, help="Micro-jitter amplitude in mm")
@@ -205,7 +205,7 @@ def main():
     parser.add_argument('--scale', type=float, default=None, help="Raw font coordinate multiplier (default: 3.0, giving ~6mm cap height)")
     parser.add_argument('--font-height', type=float, default=6.0, help="Target capital character height in mm (default 6.0mm). Sets scale = font_height / 2.0")
     parser.add_argument('--line-height', type=float, default=2.5, help="Line height spacing factor")
-    
+
     # Machine angles / PWM / Z-heights
     parser.add_argument('--servo-up', type=int, default=0, help="Marlin servo up angle in degrees (0-180, default: 0)")
     parser.add_argument('--servo-down', type=int, default=90, help="Marlin servo down angle in degrees (0-180, default: 90)")
@@ -355,9 +355,9 @@ def _run_cli(args):
             sys.exit(1)
 
     strokes, feedrates, is_out_of_bounds = generate_humanized_strokes_and_feeds(
-        input_text, 
-        jitter=args.jitter, 
-        drift=args.drift, 
+        input_text,
+        jitter=args.jitter,
+        drift=args.drift,
         scale=effective_scale,
         line_height=args.line_height,
         origin_x=args.origin_x,
@@ -378,7 +378,7 @@ def _run_cli(args):
         print("[ERROR] Bounds-Check fehlgeschlagen: G-Code wird zur Maschinensicherheit nicht erzeugt.", file=sys.stderr)
         print("        Verwende --allow-out-of-bounds, falls dies beabsichtigt ist.", file=sys.stderr)
         sys.exit(1)
-    
+
     # Mode & Pen Control Konsistenz-Auflösung
     selected_pen_control = args.pen_control
     selected_mode = args.mode

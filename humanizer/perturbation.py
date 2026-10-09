@@ -50,16 +50,16 @@ def add_micro_jitter(stroke, max_jitter=0.15, noise_scale=None, wavelength_mm=3.
             raise ValueError(f"Stroke coordinates must be finite (got {p})")
     if max_jitter <= 0:
         return [(p[0], p[1]) for p in stroke]
-    
+
     if noise_scale is not None and noise_scale > 0:
         eff_wavelength = 1.0 / noise_scale
     else:
         eff_wavelength = max(0.1, wavelength_mm)
-    
+
     base_seed = seed if seed is not None else random.randint(1, 100000)
     noise_x = PerlinNoise(octaves=3, seed=base_seed)
     noise_y = PerlinNoise(octaves=3, seed=base_seed + 1337)
-        
+
     # Calculate cumulative arc length along stroke
     arc_lengths = [0.0]
     for i in range(1, len(stroke)):
@@ -77,7 +77,7 @@ def add_micro_jitter(stroke, max_jitter=0.15, noise_scale=None, wavelength_mm=3.
         jx = x + (nx * max_jitter)
         jy = y + (ny * max_jitter)
         jittered_stroke.append((jx, jy))
-        
+
     # Preserve closed loop topology if original stroke was closed
     if len(stroke) >= 3 and stroke[0] == stroke[-1]:
         jittered_stroke[-1] = jittered_stroke[0]
@@ -97,7 +97,7 @@ def add_baseline_drift(stroke, drift_amount=0.5, type='sine'):
 
     start_x, start_y = stroke[0]
     end_x, end_y = stroke[-1]
-    
+
     total_dist = math.sqrt((end_x - start_x)**2 + (end_y - start_y)**2)
     if total_dist == 0:
         # Bei geschlossener Schleife (z.B. O) auf Bounding Box X basieren
@@ -112,29 +112,29 @@ def add_baseline_drift(stroke, drift_amount=0.5, type='sine'):
             drift_mag = math.sin(t * math.pi) * drift_amount
             drifted_stroke.append((x, y + drift_mag))
         return drifted_stroke
-        
+
     dx = end_x - start_x
     dy = end_y - start_y
     nx = -dy / total_dist
     ny = dx / total_dist
-    
+
     drifted_stroke = []
     for x, y in stroke:
         dot_product = (x - start_x) * dx + (y - start_y) * dy
         t = dot_product / (total_dist**2)
         t = max(0, min(1, t))
-        
+
         if type == 'sine':
             drift_mag = math.sin(t * math.pi) * drift_amount
         elif type == 'quadratic':
             drift_mag = 4 * t * (1 - t) * drift_amount
         else:
             drift_mag = 0
-            
+
         drifted_x = x + nx * drift_mag
         drifted_y = y + ny * drift_mag
         drifted_stroke.append((drifted_x, drifted_y))
-        
+
     return drifted_stroke
 
 def add_line_level_drift(strokes, drift_amount=0.5, seed=None):
@@ -155,15 +155,15 @@ def add_line_level_drift(strokes, drift_amount=0.5, seed=None):
 
     if drift_amount <= 0:
         return [[(p[0], p[1]) for p in s] for s in strokes]
-        
+
     all_pts = [p for s in strokes for p in s]
     if not all_pts:
         return strokes
-        
+
     min_x = min(p[0] for p in all_pts)
     max_x = max(p[0] for p in all_pts)
     line_width = max(1.0, max_x - min_x)
-    
+
     if seed is not None:
         rng = random.Random(seed)
         phase = rng.uniform(0.0, 0.5 * math.pi)
@@ -173,7 +173,7 @@ def add_line_level_drift(strokes, drift_amount=0.5, seed=None):
         phase = 0.0
         freq_factor = 1.0
         trend = 0.0
-    
+
     drifted_strokes = []
     for s in strokes:
         new_stroke = []
@@ -186,5 +186,5 @@ def add_line_level_drift(strokes, drift_amount=0.5, seed=None):
             dy = clipped_dy * drift_amount
             new_stroke.append((x, y + dy))
         drifted_strokes.append(new_stroke)
-        
+
     return drifted_strokes

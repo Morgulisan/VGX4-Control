@@ -147,7 +147,7 @@ class GCodeValidator:
     def validate(self, gcode_text: str) -> GCodeValidationResult:
         cfg = self.config
         lines = [line.strip() for line in gcode_text.splitlines() if line.strip()]
-        
+
         violations: List[str] = []
         nan_inf_count = 0
         oob_count = 0
@@ -155,7 +155,7 @@ class GCodeValidator:
         moves_after_m2 = 0
         pen_downs = 0
         pen_ups = 0
-        
+
         xs: List[float] = []
         ys: List[float] = []
         feeds: List[float] = []

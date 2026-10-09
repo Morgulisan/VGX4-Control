@@ -63,4 +63,3 @@ class FormalGCodeStateMachine:
         else:
             self.current_state = MachineState.INIT
         return self.violations
-

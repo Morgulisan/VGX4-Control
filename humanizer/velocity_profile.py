@@ -28,7 +28,7 @@ def compute_dynamic_feedrate(stroke, min_feed=800, max_feed=2400, smoothing_wind
     # Do NOT clamp a_val to 1.0; respect user-provided acceleration strictly
     if not stroke:
         return []
-        
+
     for p in stroke:
         if not math.isfinite(p[0]) or not math.isfinite(p[1]):
             raise ValueError(f"Stroke coordinates must be finite (got {p})")
@@ -38,7 +38,7 @@ def compute_dynamic_feedrate(stroke, min_feed=800, max_feed=2400, smoothing_wind
 
     n = len(stroke)
     target_feedrates = [float(min_feed)]
-    
+
     for i in range(1, n):
         if i == n - 1:
             if i > 1:
@@ -47,12 +47,12 @@ def compute_dynamic_feedrate(stroke, min_feed=800, max_feed=2400, smoothing_wind
                 angle = 0.0
         else:
             angle = _calculate_angle(stroke[i-1], stroke[i], stroke[i+1])
-            
+
         capped_angle = min(angle, math.pi / 2.0)
         fraction = 1.0 - (capped_angle / (math.pi / 2.0))
         feedrate = min_feed + fraction * (max_feed - min_feed)
         target_feedrates.append(feedrate)
-        
+
     # Distances between consecutive points in mm
     distances = [0.0]
     for i in range(1, n):
@@ -88,16 +88,16 @@ def compute_dynamic_feedrate(stroke, min_feed=800, max_feed=2400, smoothing_wind
 def _calculate_angle(p1, p2, p3):
     v1 = (p1[0] - p2[0], p1[1] - p2[1])
     v2 = (p3[0] - p2[0], p3[1] - p2[1])
-    
+
     mag1 = math.sqrt(v1[0]**2 + v1[1]**2)
     mag2 = math.sqrt(v2[0]**2 + v2[1]**2)
-    
+
     if mag1 == 0 or mag2 == 0:
         return 0
-        
+
     dot = v1[0]*v2[0] + v1[1]*v2[1]
     cos_theta = dot / (mag1 * mag2)
     cos_theta = max(-1.0, min(1.0, cos_theta))
-    
+
     theta = math.acos(cos_theta)
     return math.pi - theta

@@ -610,7 +610,7 @@ GLYPH_VARIANTS: Dict[str, List[List[Dict]]] = {
 def chaikin_smooth(points: List[Tuple[float, float]], iterations: int = 2) -> List[Tuple[float, float]]:
     if len(points) <= 2:
         return points
-    
+
     for _ in range(iterations):
         new_points = [points[0]]
         for i in range(len(points) - 1):
@@ -625,7 +625,7 @@ def chaikin_smooth(points: List[Tuple[float, float]], iterations: int = 2) -> Li
     return points
 
 class HandwritingStyle:
-    def __init__(self, seed: Optional[int] = None, slant_deg: float = 0.0, 
+    def __init__(self, seed: Optional[int] = None, slant_deg: float = 0.0,
                  height_var: float = 0.04, width_var: float = 0.04, rot_var_deg: float = 1.0):
         self.seed = seed
         self.rng = random.Random(seed) if seed is not None else random.Random()
@@ -667,7 +667,7 @@ class HandwritingStyle:
         return new_pts
 
 class StrokeGenerator:
-    def __init__(self, char_spacing: float = 0.5, word_spacing: float = 1.0, 
+    def __init__(self, char_spacing: float = 0.5, word_spacing: float = 1.0,
                  line_height: float = 3.0, smooth_iterations: int = 2,
                  seed: Optional[int] = None, enable_variants: bool = True):
         self.char_spacing = char_spacing
@@ -730,12 +730,12 @@ class StrokeGenerator:
 
                     if path_def.get('smooth', False):
                         points = chaikin_smooth(points, self.smooth_iterations)
-                    
+
                     offset_points = self._offset_path(points, current_x, current_y)
-                    
+
                     if last_point is not None and last_point != offset_points[0]:
                         strokes.append(Stroke(points=[last_point, offset_points[0]], pen_down=False))
-                    
+
                     strokes.append(Stroke(points=offset_points, pen_down=True))
                     last_point = offset_points[-1]
 

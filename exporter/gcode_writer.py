@@ -8,7 +8,7 @@ class GCodeWriter:
     VALID_WCS = {'G54', 'G55', 'G56', 'G57', 'G58', 'G59', 'auto', 'none', None}
     VALID_MODES = {'servo', 'stepper', None}
 
-    def __init__(self, feedrate=3000, 
+    def __init__(self, feedrate=3000,
                  z_feedrate=400,
                  travel_feed=3000,
                  travel_mode='controlled',
@@ -19,7 +19,7 @@ class GCodeWriter:
                  pen_control=None,
                  servo_index=0,
                  servo_pin=None,
-                 servo_up=0, servo_down=90, 
+                 servo_up=0, servo_down=90,
                  pwm_up=None, pwm_down=None,
                  stepper_up=5.0, stepper_down=0.0,
                  wcs='auto',
@@ -199,8 +199,8 @@ class GCodeWriter:
         lines.append(f"G1 F{self.feedrate} ; Default feedrate")
         return lines
 
-    def generate(self, strokes: List[List[Tuple[float, float]]], 
-                 stroke_feedrates: Optional[List[List[float]]] = None, 
+    def generate(self, strokes: List[List[Tuple[float, float]]],
+                 stroke_feedrates: Optional[List[List[float]]] = None,
                  mode=None) -> str:
         if mode not in self.VALID_MODES:
             raise ValueError(f"Unknown mode: '{mode}'. Allowed: {sorted([str(m) for m in self.VALID_MODES])}")
@@ -239,7 +239,7 @@ class GCodeWriter:
 
         lines = []
         lines.extend(self._header_commands())
-        
+
         has_strokes = any(len(s) > 0 for s in strokes)
 
         if effective_mode == 'servo':
@@ -248,7 +248,7 @@ class GCodeWriter:
             lines.extend(self._write_stepper(strokes, stroke_feedrates))
         else:
             raise ValueError(f"Unknown mode: {effective_mode}")
-            
+
         # Safe Footer Sequencing:
         # Note: If strokes were drawn, the last stroke ALREADY concluded with pen-up + lift dwell!
         # Do NOT emit a redundant second pen-up / lift dwell if already up.
@@ -270,7 +270,7 @@ class GCodeWriter:
             if self.park_x is not None and self.park_y is not None:
                 lines.append(self._travel_cmd(self.park_x, self.park_y, comment="Park pen safely"))
                 lines.append(self._planner_sync_cmd())
-            
+
         lines.append("M2 ; End of program")
         gcode_text = "\n".join(lines) + "\n"
 
@@ -307,19 +307,19 @@ class GCodeWriter:
         dwell_up = self._dwell_command(self.servo_up_delay, purpose="lift")
         if dwell_up:
             lines.append(dwell_up)
-            
+
         dwell_down = self._dwell_command(self.servo_down_delay, purpose="touchdown")
-        
+
         for idx, stroke in enumerate(strokes):
             if not stroke:
                 continue
-                
+
             feeds = stroke_feedrates[idx] if stroke_feedrates and idx < len(stroke_feedrates) else None
-            
+
             # Fahrt zum Startpunkt (Controlled oder Rapid)
             start_x, start_y = stroke[0]
             lines.append(self._travel_cmd(start_x, start_y, comment="Move to start"))
-            
+
             # Planner Sync bei Marlin vor M280 Pen-Down, damit XY-Fahrt vor Servo-Aktivierung abgeschlossen ist
             if self.firmware == 'marlin':
                 lines.append(self._planner_sync_cmd())
@@ -328,7 +328,7 @@ class GCodeWriter:
             lines.append(self._pen_down_cmd())
             if dwell_down:
                 lines.append(dwell_down)
-            
+
             # Pfad abfahren mit dynamischer Feedrate
             for p_idx, (x, y) in enumerate(stroke[1:], start=1):
                 if feeds and p_idx < len(feeds):
@@ -340,33 +340,33 @@ class GCodeWriter:
             # Planner Sync vor M280 Pen-Up bei Marlin
             if self.firmware == 'marlin':
                 lines.append(self._planner_sync_cmd())
-                
+
             # Pen up + Lift Delay vor nächstem Travel
             lines.append(self._pen_up_cmd())
             if dwell_up:
                 lines.append(dwell_up)
-            
+
         return lines
 
     def _write_stepper(self, strokes, stroke_feedrates):
         lines = []
         lines.append(f"G1 Z{self.stepper_up:.2f} F{self.z_feedrate} ; Pen up")
         lines.append(self._planner_sync_cmd())
-        
+
         for idx, stroke in enumerate(strokes):
             if not stroke:
                 continue
-                
+
             feeds = stroke_feedrates[idx] if stroke_feedrates and idx < len(stroke_feedrates) else None
-            
+
             start_x, start_y = stroke[0]
             lines.append(self._travel_cmd(start_x, start_y, comment="Move to start"))
             lines.append(self._planner_sync_cmd())
-            
+
             # Z-Achse separat mit kontrollierter Z-Feedrate absenken
             lines.append(f"G1 Z{self.stepper_down:.2f} F{self.z_feedrate} ; Pen down")
             lines.append(self._planner_sync_cmd())
-            
+
             # Pfad abfahren
             for p_idx, (x, y) in enumerate(stroke[1:], start=1):
                 if feeds and p_idx < len(feeds):
@@ -374,9 +374,9 @@ class GCodeWriter:
                     lines.append(f"G1 X{x:.2f} Y{y:.2f} F{f_val:.0f} ; Draw")
                 else:
                     lines.append(f"G1 X{x:.2f} Y{y:.2f} F{self.feedrate} ; Draw")
-                
+
             lines.append(self._planner_sync_cmd())
             lines.append(f"G1 Z{self.stepper_up:.2f} F{self.z_feedrate} ; Pen up")
             lines.append(self._planner_sync_cmd())
-            
+
         return lines
