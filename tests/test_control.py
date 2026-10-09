@@ -154,5 +154,63 @@ class HTTPTests(unittest.TestCase):
                 server.server_close()
                 thread.join()
 
+
+class PreviewSpeedTests(unittest.TestCase):
+    def prepare(self, controller, **options):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return controller.prepare(dict(text='Hallo! Äöß',width=105,height=148,pen_s=905,**options))
+
+    def test_preview_exactly_matches_rounded_pen_down_gcode(self):
+        import re
+        import xml.etree.ElementTree as ET
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent) as tmp:
+            c=Controller(tmp,demo=True)
+            self.prepare(c)
+            expected=[]
+            position=None
+            drawing=False
+            stroke=[]
+            for line in c.job['code'].splitlines():
+                if line.startswith('M3 '):
+                    drawing=True
+                    stroke=[position]
+                elif line=='M5':
+                    if len(stroke)>1: expected.append(stroke)
+                    stroke=[]
+                    drawing=False
+                elif line.startswith('G1 '):
+                    p={v[0]:float(v[1:]) for v in line.split()[1:]}
+                    position=(p['X'],p['Y'])
+                    if drawing: stroke.append(position)
+            svg=ET.fromstring(c.job['svg'])
+            actual=[[(float(x),float(y)) for x,y in re.findall(r'[ML]([0-9.]+),([0-9.]+)',p.attrib['d'])]
+                    for p in svg.findall('.//{http://www.w3.org/2000/svg}path')]
+            self.assertEqual(actual,expected)
+            self.assertEqual(svg.attrib['viewBox'],'0 0 105 148')
+
+    def test_speed_changes_feeds_but_not_document_geometry(self):
+        import re
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent) as tmp:
+            c=Controller(tmp,demo=True)
+            self.prepare(c,speed_percent=100)
+            baseline=c.job
+            self.prepare(c,speed_percent=50)
+            slow=c.job
+            self.assertEqual(baseline['svg'],slow['svg'])
+            geometry=lambda code: re.sub(r' F[0-9]+','',code)
+            self.assertEqual(geometry(baseline['code']),geometry(slow['code']))
+            speeds=lambda code: [int(f) for f in re.findall(r' F([0-9]+)',code)]
+            for normal,half in zip(speeds(baseline['code']),speeds(slow['code'])):
+                self.assertLess(half,normal)
+            self.assertEqual([x for x in slow['code'].splitlines() if x.startswith('G1 ')],
+                             [x for x in slow['dry'].splitlines() if x.startswith('G1 ')])
+            self.assertEqual(slow['summary']['settings']['speed_percent'],50)
+            self.assertNotEqual(baseline['hash'],slow['hash'])
+            for value in (25,150):
+                self.prepare(c,speed_percent=value)
+            for value in (0,24,151,True,float('nan'),float('inf')):
+                with self.assertRaises(ValueError):
+                    self.prepare(c,speed_percent=value)
+
 if __name__=='__main__':
     unittest.main()

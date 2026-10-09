@@ -10,7 +10,7 @@ import time
 import uuid
 
 from device import Device
-from vgx4_profile import VGX4Settings, render_handwriting, create_svg, create_gcode, validate_gcode
+from vgx4_profile import VGX4Settings, render_handwriting, create_svg_from_gcode, create_gcode, validate_gcode
 
 
 def number(value, low, high):
@@ -107,6 +107,7 @@ class Controller:
                 font_height=number(data.get('font_height', 5.8), 2.5, 15),
                 line_height=number(data.get('line_height', 12), 3, 25),
                 pen_down_s=int(number(data.get('pen_s', 905), 0, 1000)),
+                speed_percent=number(data.get('speed_percent', 100), 25, 150),
                 style=data.get('style', 'natural'))
             if cfg.pen_down_s != data.get('pen_s', 905):
                 raise ValueError('Stiftwert muss ganzzahlig sein.')
@@ -122,7 +123,7 @@ class Controller:
             folder.mkdir()
             digest = hashlib.sha256(code.encode()).hexdigest()
             summary = dict(id=job_id, text=text, settings=asdict(cfg), bounds=bounds, **report)
-            svg = create_svg(strokes, cfg)
+            svg = create_svg_from_gcode(code, cfg)
             for filename, content in [('schreiben.gcode', code), ('trockenlauf.gcode', dry),
                                        ('vorschau.svg', svg), ('text.txt', text),
                                        ('auftrag.json', json.dumps(summary, ensure_ascii=False, indent=2))]:

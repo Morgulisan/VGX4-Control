@@ -33,6 +33,7 @@ class VGX4Settings:
     seed: int = 42
     pen_down_s: int = 905    # Papierkontakt im realen Schreibtest bestaetigt (S1000 = Maximum)
     pen_settle_ms: int = 450
+    speed_percent: float = 100.0  # 25..150% of the curvature-aware baseline
     travel_feed: int = 1400
     origin_top_left: bool = True  # Maschine: +X rechts, +Y nach UNTEN (am Geraet gemessen). Nullpunkt = obere linke Papierecke.
 
@@ -41,6 +42,8 @@ class VGX4Settings:
             v = getattr(self,name)
             if isinstance(v, bool) or not isinstance(v,(int,float)) or not math.isfinite(v):
                 raise ValueError(f'{name} must be a finite number')
+        if isinstance(self.speed_percent, bool) or not isinstance(self.speed_percent, (int, float)) or not math.isfinite(self.speed_percent) or not 25 <= self.speed_percent <= 150:
+            raise ValueError('Geschwindigkeit muss zwischen 25 und 150 Prozent liegen')
         if self.style not in ('natural','neat','loose'):
             raise ValueError('style must be natural, neat or loose')
         if not (0 < self.page_width <= XY_WORKSPACE[0] and 0 < self.page_height <= XY_WORKSPACE[1]):
@@ -157,17 +160,19 @@ def create_gcode(strokes, cfg:VGX4Settings, dry_run:bool=False):
     if not strokes:raise ValueError('No strokes')
     style = STYLES[cfg.style]
     dwell=cfg.pen_settle_ms/1000
+    speed=cfg.speed_percent/100
+    travel_feed=int(round(cfg.travel_feed*speed))
     lines=['G21','G90','G94','M5',f'G4 P{dwell:.3f}']
     for s in strokes:
         if len(s)<2:continue
         s=[(x,(cfg.page_height-y) if cfg.origin_top_left else y) for x,y in s]
         sx,sy=s[0]
-        lines += [f'G1 X{sx:.2f} Y{sy:.2f} F{cfg.travel_feed}']
+        lines += [f'G1 X{sx:.2f} Y{sy:.2f} F{travel_feed}']
         if not dry_run: lines +=[f'M3 S{cfg.pen_down_s}',f'G4 P{dwell:.3f}']
         # Arc-length/curvature-aware speed with forward/back acceleration limits.
         # Slows in tight turns instead of a near-constant feed for all strokes.
-        feeds = compute_dynamic_feedrate(s, min_feed=style['min_feed'],
-                                         max_feed=style['max_feed'],
+        feeds = compute_dynamic_feedrate(s, min_feed=style['min_feed']*speed,
+                                         max_feed=style['max_feed']*speed,
                                          max_accel_mm_s2=220.0)
         for i,(x,y) in enumerate(s[1:],1):
             v=int(round(feeds[i]))
@@ -178,7 +183,7 @@ def create_gcode(strokes, cfg:VGX4Settings, dry_run:bool=False):
     # The pen must be raised and settled before crossing the page.
     if dry_run:
         lines += ['M5',f'G4 P{dwell:.3f}']
-    lines += [f'G1 X0.00 Y0.00 F{cfg.travel_feed}', 'G4 P0.600', 'M5', 'M2']
+    lines += [f'G1 X0.00 Y0.00 F{travel_feed}', 'G4 P0.600', 'M5', 'M2']
     code='\n'.join(lines)+'\n'
     validate_gcode(code,cfg,require_drawing=not dry_run)
     return code
@@ -247,3 +252,35 @@ def save_job(text:str, dest:Path, cfg:VGX4Settings):
         finally:
             if os.path.exists(tmp):os.unlink(tmp)
     return artifacts, validate_gcode(code,cfg)
+
+
+def create_svg_from_gcode(code: str, cfg: VGX4Settings):
+    """Draw only the pen-down segments of the final, rounded machine coordinates."""
+    validate_gcode(code, cfg)
+    position = None
+    down = False
+    current = []
+    strokes = []
+    for row in code.splitlines():
+        if row.startswith('M3 '):
+            down = True
+            current = [position]
+        elif row == 'M5':
+            if len(current) > 1:
+                strokes.append(current)
+            current = []
+            down = False
+        elif row.startswith('G1 '):
+            params = {token[0]: float(token[1:]) for token in row.split()[1:]}
+            position = (params['X'], params['Y'])
+            if down:
+                current.append(position)
+    paths = []
+    for stroke in strokes:
+        d = ' '.join(('M' if i == 0 else 'L') + f'{x:.2f},{y:.2f}' for i, (x,y) in enumerate(stroke))
+        paths.append(f'<path d="{d}"/>')
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{cfg.page_width}mm" height="{cfg.page_height}mm" '
+            f'viewBox="0 0 {cfg.page_width} {cfg.page_height}">'
+            '<rect width="100%" height="100%" fill="white"/>'
+            '<g fill="none" stroke="#202b3f" stroke-width="0.28" stroke-linejoin="round" stroke-linecap="round">'
+            + ''.join(paths) + '</g></svg>')

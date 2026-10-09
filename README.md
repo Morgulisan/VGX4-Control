@@ -88,3 +88,9 @@ Der Servo-Standard im übernommenen Profil wurde auf den im Gerätetest bestäti
 
 Die Tests simulieren das Gerät. Sie prüfen den Ablauf inklusive Trockenlaufbindung,
 Eingabegrenzen, Pause/Abbruch, HTTP-Zugriffsschutz und G-Code. Hardware wurde beim Bau des MVP nicht bewegt.
+
+## Dokumentvorschau und Tempo
+
+Die Vorschau erscheint automatisch beim Öffnen und aktualisiert sich nach Texteingaben oder Einstellungsänderungen. Sie zeigt das gesamte Blatt mit Rand und Position. Ihre Linien werden direkt aus den gerundeten Stift-unten-Koordinaten des tatsächlich gesendeten G-Codes abgeleitet; Leerfahrten werden nicht gezeichnet. Eine reale Strichbreite oder mechanische Abweichung kann die Software nicht vorhersagen.
+
+Geschwindigkeit: 25–150 % des bisherigen, kurvenabhängigen Tempos. 100 % entspricht dem getesteten Ausgangstempo. Auch Leerfahrten und Trockenlauf werden angepasst; Servopausen bleiben unverändert. Eine Tempoänderung erzeugt einen neuen Auftrag und benötigt einen neuen Trockenlauf. Das Tempo wird vor dem Start eingestellt, nicht während einer Fahrt.

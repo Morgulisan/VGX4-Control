@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 let state = null, token = '', dirty = true, requestPending = false;
-const editIds = ['text','paper','style','font','line','margin','pen'];
+let previewTimer;
+const editIds = ['text','paper','style','font','line','margin','pen','speed'];
 function error(message) { $('error').textContent=message; $('error').hidden=!message; }
 async function api(path, body) {
   const response=await fetch(path, body===undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-Control-Token':token},body:JSON.stringify(body)});
@@ -10,7 +11,7 @@ async function api(path, body) {
 }
 function payload() {
   const [width,height]=$('paper').value.split(',').map(Number);
-  return {text:$('text').value,width,height,style:$('style').value,font_height:Number($('font').value),line_height:Number($('line').value),margin:Number($('margin').value),pen_s:Number($('pen').value)};
+  return {text:$('text').value,width,height,style:$('style').value,font_height:Number($('font').value),line_height:Number($('line').value),margin:Number($('margin').value),speed_percent:Number($('speed').value),pen_s:Number($('pen').value)};
 }
 function render() {
   if(!state) return;
@@ -68,20 +69,24 @@ $('stop').onclick=()=>{$('dry-ok').checked=false;act('stop');};
 $('pause').onclick=()=>act(state.paused?'resume':'pause');
 $('dryrun').onclick=()=>{$('dry-ok').checked=false;act('dryrun',{job_id:state.job.id,area_confirmed:$('area').checked});};
 $('write').onclick=()=>act('write',{job_id:state.job.id,area_confirmed:$('area').checked,dry_confirmed:$('dry-ok').checked});
-$('prepare').onclick=async()=>{
+async function preparePreview() {
+  if (state?.busy || requestPending) return;
+  clearTimeout(previewTimer);
   requestPending=true;render();error('');
   try {
     const result=await api('/api/prepare',payload());
     dirty=false;$('dry-ok').checked=false;
     $('preview').src='/api/preview?v='+result.job.id;$('preview').hidden=false;$('empty-preview').hidden=true;
     const b=result.job.bounds;
-    $('bounds').textContent='Fahrbereich: X '+b.x_min+'–'+b.x_max+' mm · Y '+b.y_min+'–'+b.y_max+' mm · '+result.job.strokes+' Striche';
+    $('bounds').textContent='Tempo '+result.job.settings.speed_percent+' % · Fahrbereich: X '+b.x_min+'–'+b.x_max+' mm · Y '+b.y_min+'–'+b.y_max+' mm · '+result.job.strokes+' Striche';
     $('paper-size').textContent=result.job.settings.page_width+' × '+result.job.settings.page_height+' mm';
     await poll();
   } catch(e){error(e.message);}finally{requestPending=false;render();}
-};
-editIds.forEach(id=>$(id).addEventListener('input',()=>{dirty=true;$('dry-ok').checked=false;$('char-count').textContent=$('text').value.length+' / 1200';$('bounds').textContent='Text oder Einstellungen geändert · Vorschau erneut erstellen';render();}));
+}
+$('prepare').onclick=preparePreview;
+editIds.forEach(id=>$(id).addEventListener('input',()=>{dirty=true;$('dry-ok').checked=false;$('char-count').textContent=$('text').value.length+' / 1200';$('bounds').textContent='Vorschau wird aktualisiert …';$('preview').hidden=true;$('empty-preview').hidden=false;
+clearTimeout(previewTimer);previewTimer=setTimeout(preparePreview,500);render();}));
 ['area','dry-ok'].forEach(id=>$(id).onchange=render);
 // Never silently resume a saved job after reload; require a new preview.
 $('char-count').textContent=$('text').value.length+' / 1200';
-(async()=>{await poll();await ports();setInterval(poll,700);})();
+(async()=>{await poll();await ports();await preparePreview();setInterval(poll,700);})();

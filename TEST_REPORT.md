@@ -12,3 +12,9 @@
 - Lokale Echtbetriebsoberfläche gestartet; COM4 wird aufgelistet, aber nicht geöffnet.
 - Hardwaresteuerung des neuen MVP ist noch nicht am Gerät abgenommen.
   Die vorherigen direkten PowerShell-Schreibtests bei S905 waren erfolgreich.
+
+## Erweiterung: Dokumentvorschau und Geschwindigkeit
+- 14 Tests bestanden: gerundete Schreibpfade stimmen mit SVG exakt ueberein.
+- Geschwindigkeit 25-150 Prozent, identische Geometrie; Schreib- und Trockenlauf-Feeds stimmen ueberein.
+- Automatische Vorschau bei Seitenstart und nach Aenderungen; Browserpruefung bei 50 Prozent.
+- Keine Hardwarebewegung bei Entwicklung und Tests.
