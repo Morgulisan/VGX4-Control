@@ -3,6 +3,39 @@ let state = null, token = '', dirty = true, requestPending = false;
 let previewTimer, previewPending = false, previewRevision = 0, eventsKey = "";
 let previewGeometry = null;
 const editIds = ['text','paper','style','font','line','margin','pen','speed'];
+const preferencesKey = 'vgx4.preferences.v1';
+const preferenceIds = ['paper','style','font','line','margin','pen','speed','step','show-travel','show-margins','show-position'];
+function savePreferences() {
+  try {
+    const values=Object.fromEntries(preferenceIds.map(id=>{
+      const el=$(id);
+      return [id,el.type==='checkbox'?el.checked:el.value];
+    }));
+    localStorage.setItem(preferencesKey,JSON.stringify(values));
+  } catch (_) { /* Storage may be unavailable; controls remain usable. */ }
+}
+function restorePreferences() {
+  try {
+    const values=JSON.parse(localStorage.getItem(preferencesKey)||'{}');
+    if(!values||typeof values!=='object'||Array.isArray(values)) return;
+    for(const id of preferenceIds) {
+      const el=$(id), value=values[id];
+      if(el.type==='checkbox') {
+        if(typeof value==='boolean') el.checked=value;
+      } else if(el.tagName==='SELECT') {
+        if(typeof value==='string'&&Array.from(el.options).some(option=>option.value===value)) el.value=value;
+      } else if(typeof value==='string'&&value.trim()!==''&&Number.isFinite(Number(value))) {
+        const number=Number(value);
+        if(number>=Number(el.min)&&number<=Number(el.max)) el.value=value;
+      }
+    }
+  } catch (_) { /* Ignore corrupt or inaccessible saved preferences. */ }
+}
+restorePreferences();
+preferenceIds.forEach(id=>{
+  $(id).addEventListener('input',savePreferences);
+  $(id).addEventListener('change',savePreferences);
+});
 function setText(id, value) { const el=$(id); if(el.textContent!==value) el.textContent=value; }
 function error(message) { setText('error',message); $('error').hidden=!message; }
 async function api(path, body) {
