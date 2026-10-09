@@ -48,7 +48,7 @@ def make_handler(controller, token, port):
                         return self.reply({'error':'Kein Auftrag.'},404)
                     code = controller.job['code' if self.path.endswith('/write') else 'dry']
                 return self.reply(code.encode(),content_type='text/plain; charset=utf-8')
-            assets={'/':('index.html','text/html; charset=utf-8'),'/style.css':('style.css','text/css; charset=utf-8'),'/app.js':('app.js','text/javascript; charset=utf-8')}
+            assets={'/':('index.html','text/html; charset=utf-8'),'/style.css':('style.css','text/css; charset=utf-8'),'/app.js':('app.js','text/javascript; charset=utf-8'),'/theme.js':('theme.js','text/javascript; charset=utf-8')}
             if self.path in assets:
                 file,mime=assets[self.path]
                 return self.reply((ROOT/'web'/file).read_bytes(),content_type=mime)
@@ -80,7 +80,7 @@ def make_handler(controller, token, port):
 
 def main():
     parser=argparse.ArgumentParser(description='VG-X4 lokale Steuerung')
-    parser.add_argument('--demo',action='store_true',help='Simulation ohne Hardware')
+    parser.add_argument('--demo',action='store_true',help='Nur Simulation, keine echten Roboter (Standard: live)')
     parser.add_argument('--no-browser',action='store_true')
     parser.add_argument('--port',type=int,default=8765)
     args=parser.parse_args()
@@ -90,7 +90,7 @@ def main():
     controller=Controller(ROOT/'jobs',demo=args.demo)
     server=ThreadingHTTPServer(('127.0.0.1',args.port),make_handler(controller,secrets.token_urlsafe(32),args.port))
     url=f'http://127.0.0.1:{args.port}'
-    print(f'VG-X4 {"SIMULATION" if args.demo else "Steuerung"}: {url}\nBeenden mit Strg+C. Verbindung erst per Button.')
+    print(f'VG-X4 {"SIMULATION (--demo, keine echten Roboter)" if args.demo else "Steuerung"}: {url}\nBeenden mit Strg+C. Verbindung erst per Button.')
     if not args.no_browser:
         webbrowser.open(url)
     try:

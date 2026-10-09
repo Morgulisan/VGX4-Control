@@ -17,7 +17,7 @@ from device import Device
 class ControlTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent)
-        self.c=Controller(self.tmp.name,demo=True)
+        self.c=Controller(self.tmp.name)
     def tearDown(self):
         if self.c.device:
             self.c.device.realtime('stop')
@@ -36,7 +36,7 @@ class ControlTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             return self.c.prepare(dict(text=text,width=105,height=148,pen_s=905))
     def ready(self):
-        self.act('connect',port='DEMO')
+        self.act('connect',simulate=True)
         self.act('origin')
         self.act('pen_down',pen_s=905)
         self.act('calibrate',confirmed=True)
@@ -44,6 +44,36 @@ class ControlTests(unittest.TestCase):
     def test_startup_never_connects(self):
         self.assertIsNone(self.c.device)
         self.assertFalse(self.c.snapshot()['connected'])
+        self.assertFalse(self.c.snapshot()['demo'])
+    def test_simulation_only_on_explicit_request(self):
+        opened=[]
+        class Fake:
+            identity='VigoWriter 1.1f'
+            def __init__(self, port, demo=False): opened.append((port,demo))
+            def close(self): pass
+        c=Controller(self.tmp.name,device_factory=Fake)
+        for data in ({},{'port':'DEMO'},{'port':'COM4; rm'},{'simulate':'yes','port':''}):
+            with self.assertRaisesRegex(ValueError,'COM-Port'):
+                c.action('connect',data)
+        c.action('connect',{'port':'COM4'})
+        time.sleep(.1)
+        self.assertEqual(opened,[('COM4',False)])
+        self.assertFalse(c.snapshot()['demo'])
+        c.action('disconnect',{})
+        c.action('connect',{'simulate':True})
+        time.sleep(.1)
+        self.assertEqual(opened[-1],('SIMULATION',True))
+        self.assertTrue(c.snapshot()['demo'])
+        c.action('disconnect',{})
+        self.assertFalse(c.snapshot()['demo'])
+        # --demo: every connection is simulated, whatever port the client names.
+        demo=Controller(self.tmp.name,demo=True,device_factory=Fake)
+        self.assertTrue(demo.snapshot()['simulation_only'])
+        demo.action('connect',{'port':'DEMO'})
+        time.sleep(.1)
+        self.assertEqual(opened[-1],('SIMULATION',True))
+        self.assertTrue(demo.snapshot()['demo'])
+        self.assertFalse(c.snapshot()['simulation_only'])
     def test_a6_generation_and_no_pen_down_in_dryrun(self):
         result=self.prepare('Hallo! ÄÖÜß')
         job=self.c.job
@@ -53,7 +83,41 @@ class ControlTests(unittest.TestCase):
                          [x for x in job['dry'].splitlines() if x.startswith('G1 ')])
         self.assertLess(result['job']['bounds']['x_max'],105)
         self.assertLess(result['job']['bounds']['y_max'],148)
-        self.assertTrue((Path(self.tmp.name)/result['job']['id']/'vorschau.svg').exists())
+    def test_jobs_are_saved_when_run_not_on_every_preview(self):
+        self.ready()
+        folder=Path(self.tmp.name)/self.c.job['summary']['id']
+        self.assertFalse(folder.exists())
+        self.act('dryrun',job_id=self.c.job['summary']['id'],area_confirmed=True)
+        for name in ('schreiben.gcode','trockenlauf.gcode','vorschau.svg','text.txt','auftrag.json'):
+            self.assertTrue((folder/name).exists())
+        result=self.c.snapshot()['result']
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['operation'],'Trockenlauf')
+    def test_typographic_text_and_readable_errors(self):
+        self.prepare('„Grüße“ – bis bald…')
+        self.assertGreater(self.c.job['summary']['duration'],0)
+        with self.assertRaisesRegex(ValueError,'Zeichen'):
+            self.prepare('Hallo 😀')
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError,'Zeilenabstand muss mindestens 6,1 mm'):
+                self.c.prepare(dict(text='Hallo',font_height=5.8,line_height=6))
+            with self.assertRaisesRegex(ValueError,'^Rand:'):
+                self.c.prepare(dict(text='Hallo',margin=31))
+            with self.assertRaisesRegex(ValueError,'passt .* nicht aufs Papier'):
+                self.c.prepare(dict(text='Zeile\n'*40))
+    def test_lines_use_the_width_between_margins(self):
+        from vgx4_profile import wrap_lines
+        self.assertEqual(wrap_lines('Ein Stift zieht sacht auf dem Papier.',85,5.8),'Ein Stift zieht sacht auf dem\nPapier.')
+        result=self.prepare('Ein Stift zieht sacht auf dem Papier. Der Roboter schreibt ein Lachen zu dir. '*3)
+        self.assertGreater(result['job']['bounds']['x_max'],105-10-6)
+        self.assertLessEqual(result['job']['bounds']['x_max'],105-10)
+    def test_time_estimate_follows_feeds_and_dwells(self):
+        from controller import trace
+        travel,timeline=trace('G21\nM5\nG4 P0.5\nG1 X30.00 Y40.00 F600\nM3 S905\nG4 P0.5\nG1 X30.00 Y0.00 F1200\nM5\n')
+        self.assertEqual(travel,[[[0.,0.],[30.,40.]]])
+        self.assertEqual(len(timeline),8)
+        self.assertAlmostEqual(timeline[-1][0],5+2)
+        self.assertAlmostEqual(timeline[-1][1],1)
     def test_full_workflow_dryrun_is_optional_and_returns_to_origin(self):
         self.ready()
         args=dict(job_id=self.c.job['summary']['id'],area_confirmed=True,dry_confirmed=True)
@@ -65,7 +129,7 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(self.c.snapshot()['pen'],'up')
         self.assertTrue(self.c.snapshot()['origin'])
     def test_known_contact_allows_write_without_calibration_or_dryrun(self):
-        self.act('connect',port='DEMO')
+        self.act('connect',simulate=True)
         self.act('origin')
         self.prepare()
         args=dict(job_id=self.c.job['summary']['id'],area_confirmed=True)
@@ -96,11 +160,11 @@ class ControlTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Anwesenheit'):
             self.c.action('dryrun',dict(job_id=self.c.job['summary']['id']))
     def test_pen_confirmation_must_follow_real_test(self):
-        self.act('connect',port='DEMO')
+        self.act('connect',simulate=True)
         with self.assertRaisesRegex(ValueError,'absenken'):
             self.c.action('calibrate',{'confirmed':True})
     def test_invalid_inputs_cannot_become_serial_commands(self):
-        self.act('connect',port='DEMO')
+        self.act('connect',simulate=True)
         for value in (float('nan'),float('inf'),True,1001,-1,905.5):
             with self.assertRaises(ValueError):
                 self.c.action('pen_down',{'pen_s':value})
@@ -137,7 +201,7 @@ class ControlTests(unittest.TestCase):
 class HTTPTests(unittest.TestCase):
     def test_api_security_static_files_and_preview(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent) as tmp:
-            c=Controller(tmp,demo=True)
+            c=Controller(tmp)
             server=ThreadingHTTPServer(('127.0.0.1',0),lambda *args: None)
             port=server.server_address[1]
             server.RequestHandlerClass=make_handler(c,'test-token',port)
@@ -149,6 +213,8 @@ class HTTPTests(unittest.TestCase):
                     self.assertIn(b'SCHREIBATELIER',res.read())
                 with urlopen(url+'/api/state') as res:
                     self.assertFalse(json.load(res)['connected'])
+                with urlopen(url+'/api/ports') as res:
+                    self.assertNotIn('DEMO',[p['port'] for p in json.load(res)['ports']])
                 payload=json.dumps({'text':'Hallo','width':105,'height':148,'pen_s':905}).encode()
                 for headers in ({},{'X-Control-Token':'test-token','Origin':'https://evil.example'}):
                     with self.assertRaises(HTTPError) as err:
@@ -177,7 +243,7 @@ class PreviewSpeedTests(unittest.TestCase):
         import re
         import xml.etree.ElementTree as ET
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent) as tmp:
-            c=Controller(tmp,demo=True)
+            c=Controller(tmp)
             self.prepare(c)
             expected=[]
             position=None
@@ -209,7 +275,7 @@ class PreviewSpeedTests(unittest.TestCase):
     def test_speed_changes_feeds_but_not_document_geometry(self):
         import re
         with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent) as tmp:
-            c=Controller(tmp,demo=True)
+            c=Controller(tmp)
             self.prepare(c,speed_percent=100)
             baseline=c.job
             self.prepare(c,speed_percent=50)
@@ -224,11 +290,37 @@ class PreviewSpeedTests(unittest.TestCase):
                              [x for x in slow['dry'].splitlines() if x.startswith('G1 ')])
             self.assertEqual(slow['summary']['settings']['speed_percent'],50)
             self.assertNotEqual(baseline['hash'],slow['hash'])
-            for value in (25,150):
+            for value in (25,150,200,300):
                 self.prepare(c,speed_percent=value)
-            for value in (0,24,151,True,float('nan'),float('inf')):
+            self.assertLessEqual(max(speeds(c.job['code'])),2200)
+            for value in (0,24,301,True,float('nan'),float('inf')):
                 with self.assertRaises(ValueError):
                     self.prepare(c,speed_percent=value)
+
+    def test_pen_pause_sets_every_servo_dwell(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent) as tmp:
+            c=Controller(tmp)
+            slow=self.prepare(c,pen_pause=450)['job']
+            fast=self.prepare(c,pen_pause=150)['job']
+            dwells={line for line in c.job['code'].splitlines() if line.startswith('G4')}
+            self.assertEqual(dwells,{'G4 P0.150','G4 P0.600'})  # 0.6 s settle before the final M2 stays
+            self.assertLess(fast['duration'],slow['duration'])
+            self.assertLess(fast['pen_time'],slow['pen_time'])
+            for value in (99,601,150.5):
+                with self.assertRaises(ValueError):
+                    self.prepare(c,pen_pause=value)
+
+    def test_touching_strokes_share_one_pen_down_in_every_style(self):
+        from vgx4_profile import VGX4Settings, render_handwriting
+        for style in ('natural','neat','loose'):
+            for font in (2.5,5.8,15):
+                cfg=VGX4Settings(page_width=297,page_height=210,font_height=font,line_height=font*1.6,style=style)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    for text in ('u','a','n','m')+(('E',) if font<10 else ()):
+                        self.assertEqual(len(render_handwriting(text,cfg)),1,(style,font,text))
+                    # Separate marks stay separate: dot of i, crossing strokes of x.
+                    self.assertEqual(len(render_handwriting('i',cfg)),2)
+                    self.assertEqual(len(render_handwriting('x',cfg)),2)
 
 
 class StatusLatencyTests(unittest.TestCase):

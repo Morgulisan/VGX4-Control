@@ -12,10 +12,18 @@ import re
 from typing import Sequence
 
 from cli import generate_humanized_strokes_and_feeds
+from core.stroke_generator import FONT_DICT, GLYPH_METRICS
 from humanizer.velocity_profile import compute_dynamic_feedrate
 
 XY_WORKSPACE = (310.0, 256.0)  # hardware manual, mm
+MAX_FEED = 2200  # mm/min; faster speed settings are capped here instead of rejected
 SUPPORTED = set(chr(c) for c in range(32, 127)) | set('ÄÖÜäöüß')
+# Typographic characters from word processors map onto the ASCII glyphs of the stroke font.
+TYPOGRAPHIC = str.maketrans({**dict.fromkeys('„“”«»″', '"'), **dict.fromkeys('‚‘’‹›′´', "'"),
+                             **dict.fromkeys('–—‒−', '-'), **dict.fromkeys('\u00a0\u2009\u202f', ' '),
+                             '…': '...', '\u00ad': None, '\u200b': None})
+CHAR_SPACING = .18  # stroke-font units (1 unit = half the letter height)
+WORD_SPACING = 1.15
 COMMAND = re.compile(r"^([A-Z][0-9]+)(?:\s+([A-Z][-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?))*$")
 TOKEN = re.compile(r'^([A-Z])([-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)$')
 
@@ -33,7 +41,7 @@ class VGX4Settings:
     seed: int = 42
     pen_down_s: int = 905    # Papierkontakt im realen Schreibtest bestaetigt (S1000 = Maximum)
     pen_settle_ms: int = 450
-    speed_percent: float = 100.0  # 25..150% of the curvature-aware baseline
+    speed_percent: float = 100.0  # 25..300% of the curvature-aware baseline, feeds capped at MAX_FEED
     travel_feed: int = 1400
     origin_top_left: bool = True  # Maschine: +X rechts, +Y nach UNTEN (am Geraet gemessen). Nullpunkt = obere linke Papierecke.
 
@@ -42,23 +50,26 @@ class VGX4Settings:
             v = getattr(self,name)
             if isinstance(v, bool) or not isinstance(v,(int,float)) or not math.isfinite(v):
                 raise ValueError(f'{name} must be a finite number')
-        if isinstance(self.speed_percent, bool) or not isinstance(self.speed_percent, (int, float)) or not math.isfinite(self.speed_percent) or not 25 <= self.speed_percent <= 150:
-            raise ValueError('Geschwindigkeit muss zwischen 25 und 150 Prozent liegen')
+        if isinstance(self.speed_percent, bool) or not isinstance(self.speed_percent, (int, float)) or not math.isfinite(self.speed_percent) or not 25 <= self.speed_percent <= 300:
+            raise ValueError('Geschwindigkeit muss zwischen 25 und 300 Prozent liegen')
         if self.style not in ('natural','neat','loose'):
-            raise ValueError('style must be natural, neat or loose')
+            raise ValueError('Unbekannter Schriftstil.')
         if not (0 < self.page_width <= XY_WORKSPACE[0] and 0 < self.page_height <= XY_WORKSPACE[1]):
-            raise ValueError(f'Page outside {XY_WORKSPACE[0]} x {XY_WORKSPACE[1]} mm device workspace')
+            raise ValueError(f'Papier größer als der Arbeitsbereich {XY_WORKSPACE[0]:g} × {XY_WORKSPACE[1]:g} mm.')
         if self.margin_x < 0 or self.margin_x * 2 >= self.page_width:
-            raise ValueError('Invalid horizontal margins')
+            raise ValueError('Rand ist zu breit für dieses Papier.')
         if min(self.margin_top,self.margin_bottom) < 0 or self.margin_top+self.margin_bottom >= self.page_height:
-            raise ValueError('Invalid vertical margins')
-        if not (2.5 <= self.font_height <= 15) or self.line_height < self.font_height * 1.05:
-            raise ValueError('Letter height/line spacing out of range')
+            raise ValueError('Rand ist zu hoch für dieses Papier.')
+        if not (2.5 <= self.font_height <= 15):
+            raise ValueError('Schrifthöhe muss zwischen 2,5 und 15 mm liegen.')
+        if self.line_height < self.font_height * 1.05:
+            minimum = f'{math.ceil(self.font_height * 10.5) / 10:.1f}'.replace('.', ',')
+            raise ValueError(f'Zeilenabstand muss mindestens {minimum} mm betragen (1,05 × Schrifthöhe).')
         if not isinstance(self.pen_down_s,int) or isinstance(self.pen_down_s,bool) or not (0 <= self.pen_down_s <= 1000):
             raise ValueError('Pen-down servo setting must be 0..1000 (requires physical calibration)')
         if not isinstance(self.pen_settle_ms,int) or not (100 <= self.pen_settle_ms <= 3000):
             raise ValueError('Pen-settle time must be 100..3000 ms')
-        if not isinstance(self.travel_feed,int) or not (100 <= self.travel_feed <= 2200):
+        if not isinstance(self.travel_feed,int) or not (100 <= self.travel_feed <= MAX_FEED):
             raise ValueError('Travel speed must be 100..2200 mm/min')
         if not isinstance(self.seed,int) or isinstance(self.seed,bool):
             raise ValueError('Seed must be an integer')
@@ -71,20 +82,28 @@ STYLES = {
 }
 
 
+def text_width(text: str, font_height: float) -> float:
+    """Width in mm from the stroke font's own glyph advances; within ~2 % of the rendered ink."""
+    def advance(c):
+        if c == ' ':
+            return WORD_SPACING
+        return GLYPH_METRICS.get(c if c in FONT_DICT else c.upper(), .85) + CHAR_SPACING
+    return sum(map(advance, text)) * font_height / 2
+
+
 def wrap_lines(text: str, width_mm: float, font_height: float) -> str:
-    """Wrap by conservative glyph widths. Check geometric extents *after* rendering."""
-    # Renderer default glyph advance = (0.85 + 0.4)*scale; some are wider.
-    units = max(2, int(width_mm / (1.43 * font_height / 2)))
+    """Greedy word wrap by measured width. Check geometric extents *after* rendering."""
     out=[]
     for paragraph in text.replace('\r\n','\n').replace('\r','\n').split('\n'):
         if not paragraph.strip():
             out.append('');continue
         s=''
         for word in paragraph.split():
-            if len(word)>units:
-                raise ValueError(f'A word is too long for paper: {word[:35]!r}')
+            if text_width(word,font_height)>width_mm:
+                raise ValueError(f'Das Wort „{word[:35]}“ ist zu lang für eine Zeile. '
+                                 'Schrifthöhe oder Rand verkleinern oder breiteres Papier wählen.')
             proposal=word if not s else s+' '+word
-            if len(proposal)>units and s:
+            if text_width(proposal,font_height)>width_mm and s:
                 out.append(s);s=word
             else:s=proposal
         out.append(s)
@@ -115,29 +134,94 @@ def simplify(points: Sequence[tuple[float,float]], tolerance: float=.045):
     return recurse(0,len(pts)-1)
 
 
+def _project(point, stroke):
+    """Closest point on a polyline: (distance, segment index, foot point, arc length up to the foot)."""
+    best=None;arc=0.
+    for i in range(len(stroke)-1):
+        (ax,ay),(bx,by)=stroke[i],stroke[i+1]
+        dx=bx-ax;dy=by-ay;seg=math.hypot(dx,dy)
+        t=0. if seg==0 else max(0.,min(1.,((point[0]-ax)*dx+(point[1]-ay)*dy)/(seg*seg)))
+        foot=(ax+t*dx,ay+t*dy)
+        d=math.dist(point,foot)
+        if best is None or d<best[0]:best=(d,i,foot,arc+t*seg)
+        arc+=seg
+    return best
+
+
+def _length(stroke):
+    return sum(math.dist(a,b) for a,b in zip(stroke,stroke[1:]))
+
+
+def _join(a, b, tolerance, max_retrace):
+    """One pen-down path for a then b, or None. Bridges at most `tolerance` and only
+    retraces already drawn ink, so the written result looks the same with fewer pen lifts."""
+    options=[]
+    for c in (b,b[::-1]):
+        if math.dist(a[-1],c[0])<=tolerance:
+            options.append((0.,a+c))
+        # c starts on ink already drawn: run back over a to that point.
+        d,i,foot,arc=_project(c[0],a)
+        if d<=tolerance:
+            options.append((_length(a)-arc,a+a[i+1:-1][::-1]+[foot]+c))
+        # a ends on c: draw c's lead-in backwards, retrace it, then finish c.
+        d,k,foot,arc=_project(a[-1],c)
+        if d<=tolerance:
+            options.append((arc,a+[foot]+c[k::-1]+c[1:k+1]+[foot]+c[k+1:]))
+    options=[o for o in options if o[0]<=max_retrace]
+    return min(options,key=lambda o:o[0])[1] if options else None
+
+
+def join_strokes(strokes, tolerance, max_retrace):
+    """Merge touching strokes in drawing order (u, a, n, m, h …) to save pen lifts."""
+    out=[]
+    for stroke in strokes:
+        joined=_join(out[-1],stroke,tolerance,max_retrace) if out else None
+        if joined: out[-1]=joined
+        else: out.append(list(stroke))
+    return out
+
+
+def normalize_text(text: str) -> str:
+    """Replace typographic quotes, dashes and spaces by the glyphs the stroke font has."""
+    return text.translate(TYPOGRAPHIC)
+
+
 def render_handwriting(text: str, cfg: VGX4Settings):
     """Use the existing v2.6 humanized stroke engine, with device-specific layout."""
-    if not text.strip(): raise ValueError('Please enter some text')
+    text=normalize_text(text)
+    if not text.strip(): raise ValueError('Bitte Text eingeben.')
     bad=sorted({c for c in text if c not in SUPPORTED and c not in '\n\r\t'})
-    if bad: raise ValueError('Unsupported characters (would otherwise disappear): '+repr(''.join(bad)))
+    if bad: raise ValueError('Diese Zeichen kann die Schrift nicht schreiben: '+' '.join(bad)+' – bitte entfernen oder ersetzen.')
     if '\t' in text:text=text.replace('\t','    ')
-    text=wrap_lines(text,cfg.page_width-2*cfg.margin_x,cfg.font_height)
     style=STYLES[cfg.style]
-    strokes, feeds,_=generate_humanized_strokes_and_feeds(
-        text=text, jitter=style['jitter'],drift=style['drift'],scale=cfg.font_height/2,
-        line_height=cfg.line_height/(cfg.font_height/2), origin_x=cfg.margin_x,origin_y=2.0,
-        page_width=cfg.page_width,page_height=100000,
-        min_feed=style['min_feed'],max_feed=style['max_feed'],
-        max_accel=220,seed=cfg.seed, char_spacing=.18, word_spacing=1.15)
-    if not strokes: raise ValueError('Text generated no visible strokes')
+    right=cfg.page_width-cfg.margin_x
+    width=right-cfg.margin_x
+    # Slant and jitter can push a full line slightly past its measured width; rewrap narrower if so.
+    for _ in range(4):
+        strokes, feeds,_=generate_humanized_strokes_and_feeds(
+            text=wrap_lines(text,width,cfg.font_height), jitter=style['jitter'],drift=style['drift'],scale=cfg.font_height/2,
+            line_height=cfg.line_height/(cfg.font_height/2), origin_x=cfg.margin_x,origin_y=2.0,
+            page_width=cfg.page_width,page_height=100000,
+            min_feed=style['min_feed'],max_feed=style['max_feed'],
+            max_accel=220,seed=cfg.seed, char_spacing=CHAR_SPACING, word_spacing=WORD_SPACING)
+        if not strokes: raise ValueError('Der Text enthält keine schreibbaren Zeichen.')
+        overshoot=max(x for s in strokes for x,_ in s)-right
+        if overshoot<=0:
+            break
+        width-=overshoot+.2
     max_y=max(y for s in strokes for _,y in s)
     shift_y=(cfg.page_height-cfg.margin_top)-max_y
     strokes=[[(x,y+shift_y) for x,y in s] for s in strokes]
     x_lo=min(x for s in strokes for x,_ in s);x_hi=max(x for s in strokes for x,_ in s)
     y_lo=min(y for s in strokes for _,y in s);y_hi=max(y for s in strokes for _,y in s)
-    if x_lo<0 or x_hi>cfg.page_width or y_lo<cfg.margin_bottom or y_hi>cfg.page_height:
-        raise ValueError(f'Text does not fit: X={x_lo:.1f}..{x_hi:.1f}; Y={y_lo:.1f}..{y_hi:.1f} mm; use shorter text or smaller font')
-    return [simplify(s) for s in strokes if len(s)>=2]
+    if x_lo<0 or x_hi>right or y_lo<cfg.margin_bottom or y_hi>cfg.page_height:
+        raise ValueError('Der Text passt mit diesen Einstellungen nicht aufs Papier. Text kürzen, Leerzeilen entfernen, '
+                         'Schrifthöhe, Zeilenabstand oder Rand verkleinern oder größeres Papier wählen.')
+    # Jitter moves shared glyph points apart by up to ~0.3 mm; bridging that stays within the pen line.
+    # Retracing beyond ~10 mm takes longer than lifting the pen (two servo pauses plus travel).
+    strokes=join_strokes([s for s in strokes if len(s)>=2],tolerance=.3+.03*cfg.font_height,
+                         max_retrace=min(1.25*cfg.font_height,10))
+    return [simplify(s) for s in strokes]
 
 
 def create_svg(strokes, cfg:VGX4Settings):
@@ -161,7 +245,7 @@ def create_gcode(strokes, cfg:VGX4Settings, dry_run:bool=False):
     style = STYLES[cfg.style]
     dwell=cfg.pen_settle_ms/1000
     speed=cfg.speed_percent/100
-    travel_feed=int(round(cfg.travel_feed*speed))
+    travel_feed=min(MAX_FEED,int(round(cfg.travel_feed*speed)))
     lines=['G21','G90','G94','M5',f'G4 P{dwell:.3f}']
     for s in strokes:
         if len(s)<2:continue
@@ -172,7 +256,7 @@ def create_gcode(strokes, cfg:VGX4Settings, dry_run:bool=False):
         # Arc-length/curvature-aware speed with forward/back acceleration limits.
         # Slows in tight turns instead of a near-constant feed for all strokes.
         feeds = compute_dynamic_feedrate(s, min_feed=style['min_feed']*speed,
-                                         max_feed=style['max_feed']*speed,
+                                         max_feed=min(MAX_FEED,style['max_feed']*speed),
                                          max_accel_mm_s2=220.0)
         for i,(x,y) in enumerate(s[1:],1):
             v=int(round(feeds[i]))
@@ -223,7 +307,7 @@ def validate_gcode(code: str, cfg:VGX4Settings,require_drawing:bool=True):
             if set(params)!={'X','Y','F'}:raise ValueError('Incomplete XY motion command')
             x,y,f=params['X'],params['Y'],params['F']
             if not (0<=x<=cfg.page_width and 0<=y<=cfg.page_height):raise ValueError('Movement outside paper')
-            if not (100<=f<=2200):raise ValueError('Unsafe feed')
+            if not (100<=f<=MAX_FEED):raise ValueError('Unsafe feed')
             motion+=1;last_xy=(x,y)
         elif op=='M2':
             if pen!='up':raise ValueError('Job ends with pen down')
