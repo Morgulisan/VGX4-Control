@@ -18,3 +18,7 @@
 - Geschwindigkeit 25-150 Prozent, identische Geometrie; Schreib- und Trockenlauf-Feeds stimmen ueberein.
 - Automatische Vorschau bei Seitenstart und nach Aenderungen; Browserpruefung bei 50 Prozent.
 - Keine Hardwarebewegung bei Entwicklung und Tests.
+
+## Erweiterung: Stiftlatenz und Fahrwegansicht
+
+18 Tests bestanden. Neue serielle Simulationstests prüfen wiederverwendete WCO-Meldungen, kurze Idle-Abfrage ohne Koordinaten und gemeldete Position statt geplantem Ziel. G92 verwirft den alten Offset. Browserprüfung im Simulator: Stift hoch lässt den Editor aktiv; Positionspunkt bei 0/0 sichtbar. Reale Website zeigt schaltbare Leerfahrten und Randrahmen. USB wurde für den Serverneustart im Idle getrennt; keine Bewegungsbefehle am Gerät ausgeführt.

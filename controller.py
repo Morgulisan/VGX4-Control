@@ -32,7 +32,7 @@ class Controller:
         self.calibrated_s = None
         self.tested_s = None
         self.events = []
-        self.state = dict(connected=False, busy=False, paused=False, origin=False,
+        self.state = dict(connected=False, busy=False, paused=False, origin=False, frame_valid=False,
                           pen='unknown', position=None, operation='', progress=0, total=0,
                           error='', identity='', demo=demo)
 
@@ -55,7 +55,7 @@ class Controller:
             raise ValueError('Zuerst verbinden.')
 
     def _invalidate(self):
-        self.state.update(origin=False, position=None)
+        self.state.update(origin=False, position=None, frame_valid=False)
         self.dry_hash = None
 
     def _launch(self, title, work):
@@ -83,10 +83,18 @@ class Controller:
                     self.state.update(busy=False, paused=False)
         threading.Thread(target=run, daemon=True).start()
 
-    def _up(self):
+    def _up(self, settle=.6):
         self.device.send('M3 S0')
-        self.device.send('G4 P0.6')
+        self.device.send(f'G4 P{settle:g}')
         self.state['pen'] = 'up'
+
+    def _reported_position(self, position):
+        with self.lock:
+            self.state['position'] = position
+
+    def _manual_up(self):
+        self._up(settle=.12)
+        self.device.wait_idle(require_position=False)
 
     def _position(self):
         pos = self.device.wait_idle()
@@ -131,7 +139,21 @@ class Controller:
             self.job = dict(code=code, dry=dry, svg=svg, hash=digest, summary=summary, cfg=cfg)
             self.dry_hash = None
             self.log('Vorschau erstellt. Neuer Auftrag: ' + job_id[:8])
-            return {'job': summary, 'svg': svg}
+            travel = []
+            previous = (0., 0.)
+            pen_down = False
+            for line in code.splitlines():
+                if line.startswith('M3 '): pen_down = True
+                elif line == 'M5': pen_down = False
+                elif line.startswith('G1 '):
+                    params = {t[0]: float(t[1:]) for t in line.split()[1:]}
+                    target = (params['X'], params['Y'])
+                    if not pen_down and target != previous:
+                        travel.append([list(previous), list(target)])
+                    previous = target
+            geometry = {'travel': travel, 'width': cfg.page_width, 'height': cfg.page_height,
+                        'margins': {'x': cfg.margin_x, 'top': cfg.margin_top, 'bottom': cfg.margin_bottom}}
+            return {'job': summary, 'svg': svg, 'geometry': geometry}
 
     def action(self, name, data):
         with self.lock:
@@ -163,6 +185,7 @@ class Controller:
                 def connect():
                     device = self.device_factory(port, demo=self.demo)
                     with self.lock:
+                        device.on_status = self._reported_position
                         self.device = device
                         self._invalidate()
                         self.calibrated_s = self.tested_s = None
@@ -182,10 +205,10 @@ class Controller:
                         self.device.send(cmd)
                     self._position()
                     self.dry_hash = None
-                    self.state['origin'] = True
+                    self.state.update(origin=True, frame_valid=True)
                 self._launch('Startpunkt setzen', origin)
             elif name == 'pen_up':
-                self._launch('Stift hoch', lambda: (self._up(), self._position()))
+                self._launch('Stift hoch', self._manual_up)
             elif name == 'pen_down':
                 value = number(data.get('pen_s', 905), 0, 1000)
                 if int(value) != value:
@@ -193,8 +216,8 @@ class Controller:
                 self.calibrated_s = self.tested_s = None
                 def down():
                     self.device.send(f'M3 S{int(value)}')
-                    self.device.send('G4 P0.6')
-                    self._position()
+                    self.device.send('G4 P0.12')
+                    self.device.wait_idle(require_position=False)
                     self.tested_s = int(value)
                     self.state['pen'] = 'down'
                 self._launch('Stift absenken', down)
@@ -203,8 +226,7 @@ class Controller:
                     raise ValueError('Erst absenken und Papierkontakt bestätigen.')
                 value = self.tested_s
                 def calibrate():
-                    self._up()
-                    self._position()
+                    self._manual_up()
                     self.calibrated_s = value
                 self._launch('Stiftwert bestätigen und anheben', calibrate)
             elif name == 'jog':
@@ -214,7 +236,9 @@ class Controller:
                 distance = number(data.get('distance'), -20, 20)
                 if not distance:
                     raise ValueError('Bewegung darf nicht null sein.')
+                frame_valid = self.state['frame_valid']
                 self._invalidate()
+                self.state['frame_valid'] = frame_valid
                 def jog():
                     self._up()
                     for cmd in ('G21', 'G94', 'G91', f'G1 {axis}{distance:g} F300', 'G90'):

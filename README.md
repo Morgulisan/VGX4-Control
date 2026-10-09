@@ -94,3 +94,9 @@ Eingabegrenzen, Pause/Abbruch, HTTP-Zugriffsschutz und G-Code. Hardware wurde be
 Die Vorschau erscheint automatisch beim Öffnen und aktualisiert sich nach Texteingaben oder Einstellungsänderungen. Sie zeigt das gesamte Blatt mit Rand und Position. Ihre Linien werden direkt aus den gerundeten Stift-unten-Koordinaten des tatsächlich gesendeten G-Codes abgeleitet; Leerfahrten werden nicht gezeichnet. Eine reale Strichbreite oder mechanische Abweichung kann die Software nicht vorhersagen.
 
 Geschwindigkeit: 25–150 % des bisherigen, kurvenabhängigen Tempos. 100 % entspricht dem getesteten Ausgangstempo. Auch Leerfahrten und Trockenlauf werden angepasst; Servopausen bleiben unverändert. Eine Tempoänderung erzeugt einen neuen Auftrag und benötigt einen neuen Trockenlauf. Das Tempo wird vor dem Start eingestellt, nicht während einer Fahrt.
+
+## Vorschau mit Fahrwegen und schnelle Stiftbedienung
+
+Leerfahrten sind als rote gestrichelte Pfade einblendbar, die eingestellten Textränder als grüner Rahmen. Der rote Punkt zeigt die zuletzt gemeldete Arbeitsposition, sobald ein Startpunkt gesetzt ist; auch beim Joggen bleibt die Referenz sichtbar. Nach Trennen/Reset wird der Punkt ausgeblendet, bis der Startpunkt neu gesetzt ist. Der Punkt bewegt sich anhand der Statusmeldungen, nicht anhand der Befehlsbestätigungen.
+
+Manuelle Stiftbefehle nutzen 120 ms Beruhigungszeit statt 600 ms und benötigen keine neue WCO-Koordinatenmeldung. Die Oberfläche bleibt während dieser kurzen Aktionen editierbar. Hardwarebefehle werden weiterhin nacheinander bestätigt. Schreibaufträge behalten ihre bisherigen Servopausen. Meldungen werden während Fahrten etwa alle 120 ms abgefragt; die Oberfläche liest den Status alle 200 ms.

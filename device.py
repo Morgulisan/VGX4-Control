@@ -13,6 +13,11 @@ class Device:
         self.serial = None
         self.xy = [0., 0.]
         self.absolute = True
+        self.wco = None
+        self.mpos = None
+        self.position = None
+        self.on_status = None
+        self.last_query = 0
         if demo:
             self.identity = 'VigoWriter 1.1f · Simulation'
             return
@@ -53,6 +58,28 @@ class Device:
         if self.abort.is_set():
             raise RuntimeError('Abgebrochen. Neu verbinden und Startpunkt setzen.')
 
+    def handle_status(self, row):
+        if not row.startswith('<'):
+            return None
+        for key in ('MPos', 'WCO', 'WPos'):
+            match = re.search(key + r':([-\d.]+),([-\d.]+),', row)
+            if match:
+                values = tuple(map(float, match.groups()))
+                if key == 'MPos': self.mpos = values
+                elif key == 'WCO': self.wco = values
+                else: self.position = dict(zip(('x','y'), values))
+        if 'WPos:' not in row and self.mpos is not None and self.wco is not None:
+            self.position = dict(zip(('x','y'), (self.mpos[i]-self.wco[i] for i in (0,1))))
+        if self.on_status and self.position is not None:
+            self.on_status(dict(self.position))
+        return row[1:].split('|')[0]
+
+    def query_status(self):
+        if time.monotonic()-self.last_query >= .12:
+            with self.lock:
+                self.serial.write(b'?')
+            self.last_query = time.monotonic()
+
     def send(self, command):
         self._check_abort()
         while self.paused.is_set():
@@ -71,14 +98,20 @@ class Device:
                     m = re.search(axis + r'([-\d.]+)', command)
                     if m:
                         self.xy[i] = float(m[1]) + (0 if self.absolute else self.xy[i])
+            self.position = {'x':round(self.xy[0],2),'y':round(self.xy[1],2)}
+            if self.on_status: self.on_status(dict(self.position))
             return
+        if command.startswith('G92'):
+            self.wco = self.position = None
         with self.lock:
             self.serial.write((command + '\n').encode('ascii'))
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             self._check_abort()
+            self.query_status()
             row = self.serial.readline().decode('ascii', 'replace').strip()
             self.check_response(row)
+            self.handle_status(row)
             if row.lower() == 'ok':
                 return
             # A deliberate hold must not expire a buffered command's timeout.
@@ -86,37 +119,19 @@ class Device:
                 deadline = time.monotonic() + 30
         raise RuntimeError('Keine Befehlsbestätigung; Startpunkt ungültig.')
 
-    def wait_idle(self, timeout=90):
+    def wait_idle(self, timeout=90, require_position=True):
         if self.demo:
             self._check_abort()
             return {'x': round(self.xy[0], 2), 'y': round(self.xy[1], 2)}
         deadline = time.monotonic() + timeout
-        wco = None
-        mpos = None
         while time.monotonic() < deadline:
             self._check_abort()
-            with self.lock:
-                self.serial.write(b'?')
-            cycle = time.monotonic() + .3
-            while time.monotonic() < cycle:
-                row = self.serial.readline().decode('ascii', 'replace').strip()
-                self.check_response(row)
-                for key in ('WPos', 'MPos', 'WCO'):
-                    m = re.search(key + r':([-\d.]+),([-\d.]+),', row)
-                    if m:
-                        values = tuple(map(float, m.groups()))
-                        if key == 'WPos':
-                            wpos = values
-                        elif key == 'WCO':
-                            wco = values
-                        else:
-                            mpos = values
-                if row.startswith('<Idle|'):
-                    if 'WPos:' in row:
-                        return {'x': wpos[0], 'y': wpos[1]}
-                    if mpos is not None and wco is not None:
-                        return dict(zip(('x', 'y'), (mpos[i] - wco[i] for i in (0, 1))))
-                    # Request another report until WCO is supplied, never guess.
+            self.query_status()
+            row = self.serial.readline().decode('ascii', 'replace').strip()
+            self.check_response(row)
+            status = self.handle_status(row)
+            if status == 'Idle' and (not require_position or self.position is not None):
+                return dict(self.position) if self.position is not None else None
             if self.paused.is_set():
                 deadline = time.monotonic() + timeout
         raise RuntimeError('Idle/Arbeitsposition nicht bestätigt. Startpunkt ungültig.')

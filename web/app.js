@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 let state = null, token = '', dirty = true, requestPending = false;
 let previewTimer, previewPending = false, previewRevision = 0, eventsKey = "";
+let previewGeometry = null;
 const editIds = ['text','paper','style','font','line','margin','pen','speed'];
 function setText(id, value) { const el=$(id); if(el.textContent!==value) el.textContent=value; }
 function error(message) { setText('error',message); $('error').hidden=!message; }
@@ -29,8 +30,10 @@ function render() {
   setText('origin-state',state.origin?'✓ Startpunkt oben links gesetzt':'Startpunkt noch nicht gesetzt');
   setText('calibration',state.calibrated_s===null?'Stiftwert noch nicht bestätigt':'✓ Papierkontakt bei S'+state.calibrated_s+' bestätigt');
   $('prepare').disabled=state.busy||requestPending||previewPending;
-  // Preview requests must never disable or replace the focused editor.
-  for(const id of editIds) $(id).disabled=state.busy;
+  // Short servo actions must not interrupt typing or trigger a document repaint.
+  const editingLocked=state.busy && !['Stift hoch','Stift absenken','Stiftwert bestätigen und anheben'].includes(state.operation);
+  for(const id of editIds) $(id).disabled=editingLocked;
+  updatePenPosition();
   $('dryrun').disabled=!(idle&&validJob&&state.origin&&$('area').checked);
   $('write').disabled=!(idle&&validJob&&state.origin&&$('area').checked&&state.dry_completed&&$('dry-ok').checked&&state.calibrated_s===state.job.settings.pen_down_s);
   $('dry-ok').disabled=!validJob||!state.dry_completed||state.busy;
@@ -58,7 +61,16 @@ async function poll() {
 }
 async function act(name, data={}) {
   requestPending=true; render(); error('');
-  try { await api('/api/action/'+name,data); await poll(); }
+  try {
+    await api('/api/action/'+name,data);
+    await poll();
+    if(['pen_up','pen_down','calibrate'].includes(name)) {
+      while(state?.busy) {
+        await new Promise(resolve=>setTimeout(resolve,60));
+        await poll();
+      }
+    }
+  }
   catch(e) {error(e.message);} finally {requestPending=false;render();}
 }
 async function ports() {
@@ -94,6 +106,9 @@ async function preparePreview() {
     if(revision!==previewRevision) return;
     $('preview').src=image.src;
     $('preview').hidden=false;
+    $('document-sheet').hidden=false;
+    previewGeometry=result.geometry;
+    updatePreviewOverlays();
     $('empty-preview').hidden=true;
     dirty=false;$('dry-ok').checked=false;
     const b=result.job.bounds;
@@ -122,7 +137,31 @@ editIds.forEach(id=>$(id).addEventListener('input',()=>{
   previewTimer=setTimeout(preparePreview,500);
   render();
 }));
+function updatePreviewOverlays() {
+  if(!previewGeometry) return;
+  const g=previewGeometry, m=g.margins;
+  $('preview-overlay').setAttribute('viewBox','0 0 '+g.width+' '+g.height);
+  $('travel-overlay').setAttribute('d',g.travel.map(([a,b])=>'M'+a.join(',')+' L'+b.join(',')).join(' '));
+  const r=$('margin-overlay');
+  r.setAttribute('x',m.x);r.setAttribute('y',m.top);
+  r.setAttribute('width',g.width-2*m.x);r.setAttribute('height',g.height-m.top-m.bottom);
+  $('travel-overlay').hidden=!$('show-travel').checked;
+  $('travel-overlay').style.display=$('show-travel').checked?'':'none';
+  $('margin-overlay').style.display=$('show-margins').checked?'':'none';
+  updatePenPosition();
+}
+function updatePenPosition() {
+  const point=$('pen-position'), pos=state?.position;
+  const visible=previewGeometry && state?.connected && state.frame_valid && pos && $('show-position').checked;
+  point.style.display=visible?'':'none';
+  point.removeAttribute('hidden');
+  if(visible) {
+    if(point.getAttribute('cx')!==String(pos.x)) point.setAttribute('cx',pos.x);
+    if(point.getAttribute('cy')!==String(pos.y)) point.setAttribute('cy',pos.y);
+  }
+}
+['show-travel','show-margins','show-position'].forEach(id=>$(id).onchange=updatePreviewOverlays);
 ['area','dry-ok'].forEach(id=>$(id).onchange=render);
 // Never silently resume a saved job after reload; require a new preview.
 setText('char-count',$('text').value.length+' / 1200');
-(async()=>{await poll();await ports();await preparePreview();setInterval(poll,700);})();
+(async()=>{await poll();await ports();await preparePreview();setInterval(poll,200);})();

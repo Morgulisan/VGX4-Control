@@ -74,6 +74,7 @@ class ControlTests(unittest.TestCase):
         self.ready()
         self.act('jog',axis='Y',distance=-5)
         self.assertFalse(self.c.snapshot()['origin'])
+        self.assertTrue(self.c.snapshot()['frame_valid'])
         self.assertEqual(self.c.snapshot()['pen'],'up')
         self.assertFalse(self.c.snapshot()['dry_completed'])
     def test_job_id_and_presence_are_required(self):
@@ -187,6 +188,10 @@ class PreviewSpeedTests(unittest.TestCase):
                     for p in svg.findall('.//{http://www.w3.org/2000/svg}path')]
             self.assertEqual(actual,expected)
             self.assertEqual(svg.attrib['viewBox'],'0 0 105 148')
+            geometry=self.prepare(c)['geometry']
+            self.assertEqual(geometry['travel'][0][0],[0.,0.])
+            self.assertEqual(geometry['travel'][-1][1],[0.,0.])
+            self.assertEqual(geometry['margins'],{'x':10,'top':10,'bottom':10})
 
     def test_speed_changes_feeds_but_not_document_geometry(self):
         import re
@@ -211,6 +216,46 @@ class PreviewSpeedTests(unittest.TestCase):
             for value in (0,24,151,True,float('nan'),float('inf')):
                 with self.assertRaises(ValueError):
                     self.prepare(c,speed_percent=value)
+
+
+class StatusLatencyTests(unittest.TestCase):
+    class Port:
+        def __init__(self, rows):
+            self.rows=[r.encode()+b'\n' for r in rows]
+            self.writes=[]
+            self.reads=0
+        def write(self, data): self.writes.append(data);return len(data)
+        def readline(self):
+            self.reads+=1
+            if not self.rows: raise AssertionError('Unnecessary wait for another position report')
+            return self.rows.pop(0)
+    def device(self, rows):
+        d=Device('DEMO',demo=True)
+        d.demo=False
+        d.serial=self.Port(rows)
+        return d
+    def test_cached_wco_avoids_waiting_for_periodic_offset(self):
+        d=self.device(['<Idle|MPos:10,20,0|WCO:5,8,0>','<Idle|MPos:11,21,0>'])
+        self.assertEqual(d.wait_idle(),{'x':5.,'y':12.})
+        self.assertEqual(d.wait_idle(),{'x':6.,'y':13.})
+        self.assertEqual(d.serial.reads,2)
+    def test_servo_idle_does_not_require_coordinates(self):
+        d=self.device(['<Idle|MPos:10,20,0>'])
+        self.assertIsNone(d.wait_idle(require_position=False))
+        self.assertEqual(d.serial.reads,1)
+    def test_position_callback_uses_status_not_command_target(self):
+        d=self.device(['<Run|WPos:2,3,0>','ok'])
+        positions=[]
+        d.on_status=positions.append
+        d.send('G1 X20 Y30 F300')
+        self.assertEqual(positions,[{'x':2.,'y':3.}])
+    def test_g92_invalidates_cached_offset(self):
+        d=self.device(['ok'])
+        d.wco=(5.,8.)
+        d.position={'x':2.,'y':3.}
+        d.send('G92 X0 Y0')
+        self.assertIsNone(d.wco)
+        self.assertIsNone(d.position)
 
 if __name__=='__main__':
     unittest.main()
