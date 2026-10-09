@@ -22,3 +22,7 @@
 ## Erweiterung: Stiftlatenz und Fahrwegansicht
 
 18 Tests bestanden. Neue serielle Simulationstests prüfen wiederverwendete WCO-Meldungen, kurze Idle-Abfrage ohne Koordinaten und gemeldete Position statt geplantem Ziel. G92 verwirft den alten Offset. Browserprüfung im Simulator: Stift hoch lässt den Editor aktiv; Positionspunkt bei 0/0 sichtbar. Reale Website zeigt schaltbare Leerfahrten und Randrahmen. USB wurde für den Serverneustart im Idle getrennt; keine Bewegungsbefehle am Gerät ausgeführt.
+
+
+## Optionaler Trockenlauf und Live-Tempo
+20 automatisierte Tests bestanden; JavaScript-Syntax und git diff --check fehlerfrei. Geprüft: direktes Schreiben mit bestätigtem bekannten Papierkontakt ohne Trockenlauf, unveränderte Rückfahrt im G-Code bei ausgeblendeter letzter roter Verbindung, Echtzeit-Overridebytes und Tempoänderung während eines simulierten Auftrags. Lokale Website neu geladen: Kontaktbestätigung, Startbedingung und Live-Regler vorhanden. Echtzeit-Tempo am physischen Vigo-Controller noch nicht geprüft.
