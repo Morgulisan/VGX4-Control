@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VG-X4 · Schreibatelier</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><a class="brand" href="/">V<span>G</span> / X4 <small>SCHREIBATELIER</small></a><div class="connection"><span id="dot"></span><span id="connection">Nicht verbunden</span><span id="mode" class="badge">LOKAL</span></div></header>
+<main>
+<section class="intro"><div><p class="eyebrow">VOM GEDANKEN AUFS PAPIER</p><h1>Worte, die bleiben.</h1><p>Dein Text. Ein echter Stift. Kleine Unregelmäßigkeiten.</p></div><button id="stop" class="stop" disabled>■ Abbrechen</button></section>
+<div id="error" role="alert" hidden></div>
+<div class="workspace">
+<aside>
+<section class="card"><div class="section-title"><h2><span>01</span> Verbinden</h2><button id="refresh" class="icon" title="Ports aktualisieren">↻</button></div>
+<label for="port">USB-Anschluss</label><select id="port"><option value="">Ports werden geladen …</option></select>
+<button id="connect" class="secondary full">Mit Roboter verbinden</button><p class="hint">115200 Baud · VigoWriter 1.1f</p></section>
+<section class="card"><h2><span>02</span> Stift & Startpunkt</h2>
+<div class="row"><label for="step">Schrittweite</label><select id="step"><option value="1">1 mm</option><option value="5" selected>5 mm</option><option value="10">10 mm</option></select></div>
+<div class="jog"><button data-axis="Y" data-sign="-1" aria-label="Nach oben">↑</button><button data-axis="X" data-sign="-1" aria-label="Nach links">←</button><div>+Y ↓<br>+X →</div><button data-axis="X" data-sign="1" aria-label="Nach rechts">→</button><button data-axis="Y" data-sign="1" aria-label="Nach unten">↓</button></div>
+<p class="hint">Jog hebt den Stift an. Nur bewegen, wenn Platz frei ist.</p>
+<button id="origin" class="secondary full">Hier ist oben links · 0 / 0</button><p id="origin-state" class="hint">Startpunkt noch nicht gesetzt</p>
+<div class="row"><label for="pen">Stiftwert</label><input id="pen" type="number" min="0" max="1000" value="905"></div>
+<div class="two"><button id="pen-up" class="secondary">Stift hoch</button><button id="pen-down" class="secondary">Stift runter</button></div>
+<button id="calibrate" class="text-button full">Papierkontakt bestätigen & anheben</button><p id="calibration" class="hint">Bewährter Ausgangswert: S905</p></section>
+</aside>
+<section class="editor card"><div class="section-title"><h2><span>03</span> Dein Text</h2><span class="badge">EINZELSTRICHSCHRIFT</span></div>
+<textarea id="text" maxlength="1200" spellcheck="true" aria-label="Text zum Schreiben">Ein Stift zieht sacht
+auf dem Papier.
+Der Roboter schreibt
+ein Lachen zu dir.</textarea><div class="text-footer"><span>Umlaute und ß sind willkommen.</span><span id="char-count">0 / 1200</span></div>
+<div class="settings"><label>Papier<select id="paper"><option value="105,148">DIN A6 · hochkant</option><option value="148,210">DIN A5 · hochkant</option><option value="210,148">DIN A5 · quer</option><option value="210,256">210 × 256 mm</option><option value="297,210">DIN A4 · quer</option></select></label><label>Schriftstil<select id="style"><option value="natural">Natürlich</option><option value="neat">Ordentlich</option><option value="loose">Locker</option></select></label><label>Schrifthöhe · mm<input id="font" type="number" min="2.5" max="15" step="0.1" value="5.8"></label><label>Zeilenabstand · mm<input id="line" type="number" min="3" max="25" step="0.5" value="12"></label><label>Rand · mm<input id="margin" type="number" min="3" max="30" value="10"></label></div>
+<button id="prepare" class="primary full">Vorschau erstellen <span>↗</span></button><p class="hint">Erzeugte Handschrift. Deine persönliche Handschrift ist noch nicht hinterlegt.</p>
+</section>
+<section class="preview-column"><div class="preview-head"><p class="eyebrow">SO KOMMT ES AUFS PAPIER</p><span id="paper-size">105 × 148 mm</span></div><div class="paper-stage"><div id="empty-preview"><span>✎</span><p>Deine Worte bekommen Form.</p><small>Erstelle zuerst eine Vorschau.</small></div><img id="preview" alt="Handschriftvorschau auf dem gewählten Papier" hidden></div><div id="bounds" class="bounds">Noch kein Auftrag erstellt</div><div class="downloads"><a href="/api/download/write" download="schreiben.gcode">G-Code ↓</a><a href="/api/download/dryrun" download="trockenlauf.gcode">Trockenlauf ↓</a></div></section>
+</div>
+<section class="run-panel card"><div class="run-checks"><label><input id="area" type="checkbox"> Ich bin am Gerät. Papier und Fahrbereich ab Startpunkt sind frei.</label><label><input id="dry-ok" type="checkbox"> Dieser Trockenlauf war frei und ist zum Start zurückgekehrt.</label></div><div class="run-actions"><button id="dryrun" class="secondary">Trockenlauf · Stift oben</button><button id="write" class="primary">Auf Papier schreiben →</button><button id="pause" class="secondary" disabled>Pause</button></div><div class="progress-label"><span id="operation">Bereit für deine Ideen</span><span id="progress-text">0 / 0</span></div><progress id="progress" max="1" value="0"></progress><p class="hint">Abbrechen setzt den Controller zurück. Danach neu verbinden und Startpunkt setzen. Stift kann unten bleiben.</p></section>
+<details class="card log"><summary>Verlauf & Verbindung <span id="position">Position unbekannt</span></summary><pre id="identity"></pre><ol id="events"></ol></details>
+</main><footer>VG-X4 · Lokal auf deinem Rechner · +X rechts / +Y unten</footer>
+</body></html>

@@ -1,0 +1,2 @@
+perlin-noise==1.13
+pyserial==3.5
