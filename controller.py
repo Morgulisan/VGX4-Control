@@ -34,7 +34,7 @@ class Controller:
         self.events = []
         self.state = dict(connected=False, busy=False, paused=False, origin=False, frame_valid=False,
                           pen='unknown', position=None, operation='', progress=0, total=0,
-                          error='', identity='', demo=demo)
+                          error='', identity='', demo=demo, live_speed=100)
 
     def log(self, message):
         with self.lock:
@@ -151,12 +151,24 @@ class Controller:
                     if not pen_down and target != previous:
                         travel.append([list(previous), list(target)])
                     previous = target
+            # Hide only the final return; the machine still returns to its start.
+            if travel and travel[-1][1] == [0., 0.]:
+                travel.pop()
             geometry = {'travel': travel, 'width': cfg.page_width, 'height': cfg.page_height,
                         'margins': {'x': cfg.margin_x, 'top': cfg.margin_top, 'bottom': cfg.margin_bottom}}
             return {'job': summary, 'svg': svg, 'geometry': geometry}
 
     def action(self, name, data):
         with self.lock:
+            if name == 'speed':
+                if not self.device or not self.state['busy'] or self.state['operation'] not in ('Schreiben', 'Trockenlauf'):
+                    raise ValueError('Tempo nur während eines Schreib- oder Trockenlaufs ändern.')
+                percent = number(data.get('percent'), 10, 150)
+                if int(percent) != percent:
+                    raise ValueError('Tempo muss ganzzahlig sein.')
+                self.device.set_feed_override(int(percent))
+                self.state['live_speed'] = int(percent)
+                return
             if name in ('pause', 'resume', 'stop'):
                 if not self.device:
                     raise ValueError('Nicht verbunden.')
@@ -253,13 +265,13 @@ class Controller:
                 if data.get('area_confirmed') is not True:
                     raise ValueError('Anwesenheit und freien Fahrbereich bestätigen.')
                 if name == 'write':
-                    if self.calibrated_s != self.job['cfg'].pen_down_s:
+                    if self.calibrated_s != self.job['cfg'].pen_down_s and data.get('contact_confirmed') is not True:
                         raise ValueError('Papierkontakt für den Stiftwert dieses Auftrags bestätigen.')
-                    if self.dry_hash != self.job['hash'] or data.get('dry_confirmed') is not True:
-                        raise ValueError('Diesen Auftrag zuerst trocken fahren und Ergebnis bestätigen.')
                 job = self.job
                 dry = name == 'dryrun'
                 self.dry_hash = None if dry else self.dry_hash
+                self.device.set_feed_override(100, reset=True)
+                self.state['live_speed'] = 100
                 def transfer():
                     # Remain at the start after M2; set the workspace explicitly each run.
                     self._up()

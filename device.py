@@ -18,6 +18,7 @@ class Device:
         self.position = None
         self.on_status = None
         self.last_query = 0
+        self.feed_override = 100
         if demo:
             self.identity = 'VigoWriter 1.1f · Simulation'
             return
@@ -152,6 +153,21 @@ class Device:
         if self.serial:
             with self.lock:
                 self.serial.write(data)
+
+    def set_feed_override(self, percent, reset=False):
+        if isinstance(percent, bool) or not isinstance(percent, int) or not 10 <= percent <= 150:
+            raise ValueError('Tempo zwischen 10 und 150 Prozent erwartet.')
+        # GRBL realtime bytes bypass the queued G-code and do not alter servo PWM.
+        with self.lock:
+            data = b'\x90' if reset else b''
+            current = 100 if reset else self.feed_override
+            delta = percent - current
+            coarse, fine = divmod(abs(delta), 10)
+            data += (b'\x91' if delta > 0 else b'\x92') * coarse
+            data += (b'\x93' if delta > 0 else b'\x94') * fine
+            if self.serial and data:
+                self.serial.write(data)
+            self.feed_override = percent
 
     def close(self):
         if self.serial:

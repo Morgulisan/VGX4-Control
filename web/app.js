@@ -35,7 +35,11 @@ function render() {
   for(const id of editIds) $(id).disabled=editingLocked;
   updatePenPosition();
   $('dryrun').disabled=!(idle&&validJob&&state.origin&&$('area').checked);
-  $('write').disabled=!(idle&&validJob&&state.origin&&$('area').checked&&state.dry_completed&&$('dry-ok').checked&&state.calibrated_s===state.job.settings.pen_down_s);
+  const contact=validJob&&(state.calibrated_s===state.job.settings.pen_down_s||$('contact-ok').checked);
+  $('write').disabled=!(idle&&validJob&&state.origin&&$('area').checked&&contact);
+  setText('write-readiness',!state.connected?'Zum Schreiben zuerst verbinden.':state.busy?'Vorgang läuft.':!validJob?'Auf aktuelle Vorschau warten.':!state.origin?'Startpunkt oben links setzen.':!$('area').checked?'Anwesenheit und freien Fahrbereich bestätigen.':!contact?'Papierkontakt des eingestellten Stiftwerts bestätigen.':'Bereit zum Schreiben · Trockenlauf ist optional.');
+  $('live-speed').disabled=!(state.connected&&state.busy&&['Schreiben','Trockenlauf'].includes(state.operation));
+  if(document.activeElement!==$('live-speed')&&!liveSpeedPending) { $('live-speed').value=state.live_speed; setText('live-speed-value',state.live_speed+' %'); }
   $('dry-ok').disabled=!validJob||!state.dry_completed||state.busy;
   $('pause').disabled=!state.busy||!state.connected;
   setText('pause',state.paused?'Fortsetzen':'Pause');
@@ -86,7 +90,7 @@ document.querySelectorAll('[data-axis]').forEach(b=>b.onclick=()=>{$('dry-ok').c
 $('stop').onclick=()=>{$('dry-ok').checked=false;act('stop');};
 $('pause').onclick=()=>act(state.paused?'resume':'pause');
 $('dryrun').onclick=()=>{$('dry-ok').checked=false;act('dryrun',{job_id:state.job.id,area_confirmed:$('area').checked});};
-$('write').onclick=()=>act('write',{job_id:state.job.id,area_confirmed:$('area').checked,dry_confirmed:$('dry-ok').checked});
+$('write').onclick=()=>act('write',{job_id:state.job.id,area_confirmed:$('area').checked,contact_confirmed:$('contact-ok').checked});
 async function preparePreview() {
   if (previewPending) return;
   if (state?.busy || requestPending) {
@@ -128,6 +132,7 @@ async function preparePreview() {
 }
 $('prepare').onclick=preparePreview;
 editIds.forEach(id=>$(id).addEventListener('input',()=>{
+  if(id==='pen') $('contact-ok').checked=false;
   previewRevision++;
   dirty=true;$('dry-ok').checked=false;
   setText('char-count',$('text').value.length+' / 1200');
@@ -161,7 +166,19 @@ function updatePenPosition() {
   }
 }
 ['show-travel','show-margins','show-position'].forEach(id=>$(id).onchange=updatePreviewOverlays);
-['area','dry-ok'].forEach(id=>$(id).onchange=render);
+['area','dry-ok','contact-ok'].forEach(id=>$(id).onchange=render);
+let liveSpeedPending=false, liveSpeedTimer, liveSpeedRevision=0;
+$('live-speed').oninput=()=>{
+  setText('live-speed-value',$('live-speed').value+' %');
+  const revision=++liveSpeedRevision;
+  liveSpeedPending=true;
+  clearTimeout(liveSpeedTimer);
+  liveSpeedTimer=setTimeout(async()=>{
+    try { await api('/api/action/speed',{percent:Number($('live-speed').value)}); }
+    catch(e) { error(e.message); }
+    finally { if(revision===liveSpeedRevision) { liveSpeedPending=false; await poll(); } }
+  },100);
+};
 // Never silently resume a saved job after reload; require a new preview.
 setText('char-count',$('text').value.length+' / 1200');
 (async()=>{await poll();await ports();await preparePreview();setInterval(poll,200);})();

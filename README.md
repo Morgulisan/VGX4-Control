@@ -100,3 +100,6 @@ Geschwindigkeit: 25–150 % des bisherigen, kurvenabhängigen Tempos. 100 % ents
 Leerfahrten sind als rote gestrichelte Pfade einblendbar, die eingestellten Textränder als grüner Rahmen. Der rote Punkt zeigt die zuletzt gemeldete Arbeitsposition, sobald ein Startpunkt gesetzt ist; auch beim Joggen bleibt die Referenz sichtbar. Nach Trennen/Reset wird der Punkt ausgeblendet, bis der Startpunkt neu gesetzt ist. Der Punkt bewegt sich anhand der Statusmeldungen, nicht anhand der Befehlsbestätigungen.
 
 Manuelle Stiftbefehle nutzen 120 ms Beruhigungszeit statt 600 ms und benötigen keine neue WCO-Koordinatenmeldung. Die Oberfläche bleibt während dieser kurzen Aktionen editierbar. Hardwarebefehle werden weiterhin nacheinander bestätigt. Schreibaufträge behalten ihre bisherigen Servopausen. Meldungen werden während Fahrten etwa alle 120 ms abgefragt; die Oberfläche liest den Status alle 200 ms.
+
+
+Aktualisierung: Trockenlauf ist optional. Zum Schreiben müssen Verbindung, aktuelle Vorschau, Startpunkt, freier Fahrbereich und Papierkontakt bestätigt sein. Bereits bekannter Papierkontakt kann direkt im Startbereich bestätigt werden. Der Live-Regler (10–150 %) ändert das Auftragstempo über GRBL-Echtzeitbefehle; jeder Lauf beginnt bei 100 %. Die abschließende Rückfahrt bleibt im G-Code, wird aber nicht rot dargestellt.

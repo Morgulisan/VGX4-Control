@@ -54,17 +54,29 @@ class ControlTests(unittest.TestCase):
         self.assertLess(result['job']['bounds']['x_max'],105)
         self.assertLess(result['job']['bounds']['y_max'],148)
         self.assertTrue((Path(self.tmp.name)/result['job']['id']/'vorschau.svg').exists())
-    def test_full_workflow_requires_dryrun_then_returns_to_origin(self):
+    def test_full_workflow_dryrun_is_optional_and_returns_to_origin(self):
         self.ready()
         args=dict(job_id=self.c.job['summary']['id'],area_confirmed=True,dry_confirmed=True)
-        with self.assertRaisesRegex(ValueError,'trocken'):
-            self.c.action('write',args)
+        self.act('write',**args)
         self.act('dryrun',**args)
         self.assertTrue(self.c.snapshot()['dry_completed'])
         self.assertEqual(self.c.snapshot()['position'],{'x':0.,'y':0.})
         self.act('write',**args)
         self.assertEqual(self.c.snapshot()['pen'],'up')
         self.assertTrue(self.c.snapshot()['origin'])
+    def test_known_contact_allows_write_without_calibration_or_dryrun(self):
+        self.act('connect',port='DEMO')
+        self.act('origin')
+        self.prepare()
+        args=dict(job_id=self.c.job['summary']['id'],area_confirmed=True)
+        with self.assertRaisesRegex(ValueError,'Papierkontakt'): self.c.action('write',args)
+        self.c.action('write',dict(**args,contact_confirmed=True))
+        self.c.action('speed',{'percent':65})
+        self.assertEqual(self.c.snapshot()['live_speed'],65)
+        self.wait()
+        self.assertEqual(self.c.snapshot()['error'],'')
+        self.assertTrue(self.c.snapshot()['origin'])
+
     def test_new_job_invalidates_dryrun(self):
         self.ready()
         self.act('dryrun',job_id=self.c.job['summary']['id'],area_confirmed=True)
@@ -190,7 +202,8 @@ class PreviewSpeedTests(unittest.TestCase):
             self.assertEqual(svg.attrib['viewBox'],'0 0 105 148')
             geometry=self.prepare(c)['geometry']
             self.assertEqual(geometry['travel'][0][0],[0.,0.])
-            self.assertEqual(geometry['travel'][-1][1],[0.,0.])
+            self.assertNotEqual(geometry['travel'][-1][1],[0.,0.])
+            self.assertIn('G1 X0.00 Y0.00', c.job['code'])
             self.assertEqual(geometry['margins'],{'x':10,'top':10,'bottom':10})
 
     def test_speed_changes_feeds_but_not_document_geometry(self):
@@ -249,6 +262,16 @@ class StatusLatencyTests(unittest.TestCase):
         d.on_status=positions.append
         d.send('G1 X20 Y30 F300')
         self.assertEqual(positions,[{'x':2.,'y':3.}])
+    def test_live_override_uses_realtime_bytes_without_gcode(self):
+        d=self.device([])
+        d.set_feed_override(73)
+        d.set_feed_override(110)
+        d.set_feed_override(100, reset=True)
+        self.assertEqual(d.serial.writes,[b'\x92'*2+b'\x94'*7,b'\x91'*3+b'\x93'*7,b'\x90'])
+        self.assertEqual(d.serial.reads,0)
+        for value in (0,151,True,90.5):
+            with self.assertRaises(ValueError): d.set_feed_override(value)
+
     def test_g92_invalidates_cached_offset(self):
         d=self.device(['ok'])
         d.wco=(5.,8.)
