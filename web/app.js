@@ -1,8 +1,9 @@
 const $ = id => document.getElementById(id);
 let state = null, token = '', dirty = true, requestPending = false;
-let previewTimer;
+let previewTimer, previewPending = false, previewRevision = 0, eventsKey = "";
 const editIds = ['text','paper','style','font','line','margin','pen','speed'];
-function error(message) { $('error').textContent=message; $('error').hidden=!message; }
+function setText(id, value) { const el=$(id); if(el.textContent!==value) el.textContent=value; }
+function error(message) { setText('error',message); $('error').hidden=!message; }
 async function api(path, body) {
   const response=await fetch(path, body===undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-Control-Token':token},body:JSON.stringify(body)});
   const data=await response.json();
@@ -15,32 +16,37 @@ function payload() {
 }
 function render() {
   if(!state) return;
-  const idle=state.connected&&!state.busy&&!requestPending, validJob=state.job&&!dirty;
-  $('connection').textContent=state.connected ? (state.busy ? 'Verbunden · aktiv':'Verbunden · bereit') : 'Nicht verbunden';
+  const idle=state.connected&&!state.busy&&!requestPending&&!previewPending, validJob=state.job&&!dirty&&!previewPending;
+  setText('connection',state.connected ? (state.busy ? 'Verbunden · aktiv':'Verbunden · bereit') : 'Nicht verbunden');
   $('dot').classList.toggle('on',state.connected);
-  $('mode').textContent=state.demo?'SIMULATION':'LOKAL'; $('mode').classList.toggle('demo',state.demo);
-  $('connect').textContent=state.connected?'Verbindung trennen':'Mit Roboter verbinden';
+  setText('mode',state.demo?'SIMULATION':'LOKAL'); $('mode').classList.toggle('demo',state.demo);
+  setText('connect',state.connected?'Verbindung trennen':'Mit Roboter verbinden');
   $('connect').disabled=state.busy||requestPending||(!state.connected&&!$('port').value);
   $('port').disabled=state.connected||state.busy; $('refresh').disabled=state.busy;
   for(const id of ['origin','pen-up','pen-down']) $(id).disabled=!idle;
   document.querySelectorAll('[data-axis]').forEach(b=>b.disabled=!idle);
   $('calibrate').disabled=!idle||state.tested_s!==Number($('pen').value);
-  $('origin-state').textContent=state.origin?'✓ Startpunkt oben links gesetzt':'Startpunkt noch nicht gesetzt';
-  $('calibration').textContent=state.calibrated_s===null?'Stiftwert noch nicht bestätigt':'✓ Papierkontakt bei S'+state.calibrated_s+' bestätigt';
-  $('prepare').disabled=state.busy||requestPending;
-  for(const id of editIds) $(id).disabled=state.busy||requestPending;
+  setText('origin-state',state.origin?'✓ Startpunkt oben links gesetzt':'Startpunkt noch nicht gesetzt');
+  setText('calibration',state.calibrated_s===null?'Stiftwert noch nicht bestätigt':'✓ Papierkontakt bei S'+state.calibrated_s+' bestätigt');
+  $('prepare').disabled=state.busy||requestPending||previewPending;
+  // Preview requests must never disable or replace the focused editor.
+  for(const id of editIds) $(id).disabled=state.busy;
   $('dryrun').disabled=!(idle&&validJob&&state.origin&&$('area').checked);
   $('write').disabled=!(idle&&validJob&&state.origin&&$('area').checked&&state.dry_completed&&$('dry-ok').checked&&state.calibrated_s===state.job.settings.pen_down_s);
   $('dry-ok').disabled=!validJob||!state.dry_completed||state.busy;
   $('pause').disabled=!state.busy||!state.connected;
-  $('pause').textContent=state.paused?'Fortsetzen':'Pause';
+  setText('pause',state.paused?'Fortsetzen':'Pause');
   $('stop').disabled=!state.connected;
-  $('operation').textContent=(state.paused?'Pausiert · ':'')+(state.operation||'Bereit für deine Ideen')+(state.busy?' …':'');
+  setText('operation',(state.paused?'Pausiert · ':'')+(state.operation||'Bereit für deine Ideen')+(state.busy?' …':''));
   $('progress').max=state.total||1; $('progress').value=state.progress;
-  $('progress-text').textContent=state.progress+' / '+state.total;
-  $('identity').textContent=state.identity;
-  $('position').textContent=state.position?'Arbeitsposition X '+state.position.x.toFixed(2)+' / Y '+state.position.y.toFixed(2)+' mm':'Position unbekannt';
-  $('events').replaceChildren(...state.events.slice().reverse().map(event=>{const li=document.createElement('li'); li.textContent=event.time+'  '+event.message;return li;}));
+  setText('progress-text',state.progress+' / '+state.total);
+  setText('identity',state.identity);
+  setText('position',state.position?'Arbeitsposition X '+state.position.x.toFixed(2)+' / Y '+state.position.y.toFixed(2)+' mm':'Position unbekannt');
+  const nextEventsKey=JSON.stringify(state.events);
+  if(nextEventsKey!==eventsKey) {
+    $('events').replaceChildren(...state.events.slice().reverse().map(event=>{const li=document.createElement('li'); li.textContent=event.time+'  '+event.message;return li;}));
+    eventsKey=nextEventsKey;
+  }
   document.querySelectorAll('.downloads a').forEach(a=>{a.style.pointerEvents=validJob?'auto':'none';a.style.opacity=validJob?'1':'.35';});
 }
 async function poll() {
@@ -70,23 +76,53 @@ $('pause').onclick=()=>act(state.paused?'resume':'pause');
 $('dryrun').onclick=()=>{$('dry-ok').checked=false;act('dryrun',{job_id:state.job.id,area_confirmed:$('area').checked});};
 $('write').onclick=()=>act('write',{job_id:state.job.id,area_confirmed:$('area').checked,dry_confirmed:$('dry-ok').checked});
 async function preparePreview() {
-  if (state?.busy || requestPending) return;
+  if (previewPending) return;
+  if (state?.busy || requestPending) {
+    if(dirty) { clearTimeout(previewTimer); previewTimer=setTimeout(preparePreview,500); }
+    return;
+  }
   clearTimeout(previewTimer);
-  requestPending=true;render();error('');
+  const revision=previewRevision, requested=payload();
+  previewPending=true;render();error('');
   try {
-    const result=await api('/api/prepare',payload());
+    const result=await api('/api/prepare',requested);
+    if(revision!==previewRevision) return;
+    // Decode the replacement off-screen; leave the old document in place.
+    const image=new Image();
+    image.src='/api/preview?v='+result.job.id;
+    await image.decode();
+    if(revision!==previewRevision) return;
+    $('preview').src=image.src;
+    $('preview').hidden=false;
+    $('empty-preview').hidden=true;
     dirty=false;$('dry-ok').checked=false;
-    $('preview').src='/api/preview?v='+result.job.id;$('preview').hidden=false;$('empty-preview').hidden=true;
     const b=result.job.bounds;
-    $('bounds').textContent='Tempo '+result.job.settings.speed_percent+' % · Fahrbereich: X '+b.x_min+'–'+b.x_max+' mm · Y '+b.y_min+'–'+b.y_max+' mm · '+result.job.strokes+' Striche';
-    $('paper-size').textContent=result.job.settings.page_width+' × '+result.job.settings.page_height+' mm';
+    setText('bounds','Tempo '+result.job.settings.speed_percent+' % · Fahrbereich: X '+b.x_min+'–'+b.x_max+' mm · Y '+b.y_min+'–'+b.y_max+' mm · '+result.job.strokes+' Striche');
+    setText('paper-size',result.job.settings.page_width+' × '+result.job.settings.page_height+' mm');
     await poll();
-  } catch(e){error(e.message);}finally{requestPending=false;render();}
+  } catch(e){
+    if(revision===previewRevision) error(e.message);
+  } finally {
+    previewPending=false;render();
+    // An edit made during the request needs its own preview; never approve stale input.
+    if(revision!==previewRevision) {
+      clearTimeout(previewTimer);
+      previewTimer=setTimeout(preparePreview,500);
+    }
+  }
 }
 $('prepare').onclick=preparePreview;
-editIds.forEach(id=>$(id).addEventListener('input',()=>{dirty=true;$('dry-ok').checked=false;$('char-count').textContent=$('text').value.length+' / 1200';$('bounds').textContent='Vorschau wird aktualisiert …';$('preview').hidden=true;$('empty-preview').hidden=false;
-clearTimeout(previewTimer);previewTimer=setTimeout(preparePreview,500);render();}));
+editIds.forEach(id=>$(id).addEventListener('input',()=>{
+  previewRevision++;
+  dirty=true;$('dry-ok').checked=false;
+  setText('char-count',$('text').value.length+' / 1200');
+  setText('bounds','Vorschau wird aktualisiert …');
+  // Keep the current preview visible instead of collapsing and rebuilding it.
+  clearTimeout(previewTimer);
+  previewTimer=setTimeout(preparePreview,500);
+  render();
+}));
 ['area','dry-ok'].forEach(id=>$(id).onchange=render);
 // Never silently resume a saved job after reload; require a new preview.
-$('char-count').textContent=$('text').value.length+' / 1200';
+setText('char-count',$('text').value.length+' / 1200');
 (async()=>{await poll();await ports();await preparePreview();setInterval(poll,700);})();
