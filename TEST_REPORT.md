@@ -26,3 +26,11 @@
 
 ## Optionaler Trockenlauf und Live-Tempo
 20 automatisierte Tests bestanden; JavaScript-Syntax und git diff --check fehlerfrei. Geprüft: direktes Schreiben mit bestätigtem bekannten Papierkontakt ohne Trockenlauf, unveränderte Rückfahrt im G-Code bei ausgeblendeter letzter roter Verbindung, Echtzeit-Overridebytes und Tempoänderung während eines simulierten Auftrags. Lokale Website neu geladen: Kontaktbestätigung, Startbedingung und Live-Regler vorhanden. Echtzeit-Tempo am physischen Vigo-Controller noch nicht geprüft.
+
+## Überarbeitung Oberfläche und Bedienung
+
+23 automatisierte Tests bestanden; JavaScript-Syntax mit node --check geprüft. Neu geprüft: Aufträge werden erst beim Start gespeichert, typografische Zeichen werden ersetzt, deutsche Fehlermeldungen mit Feldnamen, Zeitschätzung aus Vorschub und Servopausen, Ergebnis des letzten Laufs. Browserprüfung im Simulator (Desktop 1440 × 900, Handy 375 px, hell und dunkel): Verbinden, Startpunkt, Stift absenken/bestätigen, Checkliste, Schreiben, Trockenlauf, Pause/Fortsetzen und Abbruch über die feste Laufleiste, Fehleranzeigen für ungültige Eingaben und zu langen Text. Kein horizontales Scrollen auf Handybreite. Keine Hardwarebewegung.
+
+## Umbruch, Simulation, Stiftwechsel und Tempo
+
+27 automatisierte Tests bestanden. Zeilenumbruch nach gemessener Glyphenbreite statt Zeichenzahl (längste Zeile füllt mindestens 85 % der Breite, nie über den rechten Rand). Server startet immer live; Simulation nur über „Ohne Roboter testen“ oder `--demo`. Berührende Striche werden ohne Stiftwechsel gezeichnet (Beispielgedicht 109 → 77 Stiftwechsel, Brieftext 136 → 85), in allen Stilen und Größen; i-Punkte und Kreuzungen bleiben getrennt. Stiftpause einstellbar (Standard 300 ms statt 450 ms), Tempo bis 300 % bei Vorschubgrenze 2200 mm/min. Geschätzte Dauer Beispielgedicht A6: vorher 2:16 min (150 %), jetzt 1:29 min (150 %, 300 ms) bzw. 0:56 min (300 %, 150 ms). Stiftpause unter 450 ms und Tempo über 150 % sind am Gerät noch nicht geprüft.
