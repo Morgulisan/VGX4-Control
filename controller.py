@@ -156,7 +156,7 @@ class Controller:
             pen_down_s=int(number(data.get('pen_s', 905), 0, 1000, 'Stiftwert')),
             pen_settle_ms=int(number(data.get('pen_pause', 300), 100, 600, 'Stiftpause')),
             speed_percent=number(data.get('speed_percent', 100), 25, 300, 'Geschwindigkeit'),
-            style=data.get('style', 'natural'))
+            style=data.get('style', 'natural'), typeface=data.get('typeface', 'handwriting'))
         if cfg.pen_down_s != data.get('pen_s', 905):
             raise ValueError('Stiftwert muss ganzzahlig sein.')
         if cfg.pen_settle_ms != data.get('pen_pause', 300):

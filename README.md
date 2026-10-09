@@ -79,7 +79,16 @@ Bei einem Fehler wird nicht automatisch zurückgefahren. Netzschalter bleibt dir
 Die Seite darf geschlossen werden, während der lokale Server weiterläuft; sie zeigt nach erneutem Öffnen
 den laufenden Status. Eine neue Vorschau ist für einen neuen Start erforderlich.
 
-Die Schrift ist die vorhandene Einzelstrich-Programmschrift mit kleinen Abweichungen.
+Die Standardschrift ist die vorhandene Einzelstrich-Programmschrift mit kleinen Abweichungen.
+Unter „Schriftart“ lassen sich weitere Einzelstrich-Schriften wählen: Futura (serifenlos), Roman (Antiqua),
+Times (Serifen), Times kursiv, Schreibschrift (Script) und Kursive Handschrift. Es sind nur echte Strichschriften
+(Hershey-Schriften); Duplex-, Triplex-, Fett- und gotische Schnitte täuschen Gewicht mit mehreren parallelen Linien
+vor und würden mit dem Stift ausgefüllt wirken, daher fehlen sie. Umlaute werden aus Buchstabe und zwei Punkten
+gebildet; „ß“ wird in den zusätzlichen Schriften als „ss“ geschrieben. Die Schriftdaten stehen in
+`core/stroke_font_data.py` und werden mit `tools/build_stroke_fonts.py` erzeugt.
+
+**Schriftnachweis:** Hershey Fonts, digitalisiert von Dr. A. V. Hershey (U.S. National Bureau of Standards).
+Die Nutzung ist für jeden Zweck erlaubt, sofern dieser Nachweis erhalten bleibt.
 Persönliche Handschrift, Upload/Nachzeichnen von Schriftproben, freie G-Code-Eingabe,
 Netzwerkzugriff und Mehrbenutzerbetrieb sind nicht Teil dieses MVP.
 

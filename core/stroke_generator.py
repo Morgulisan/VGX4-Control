@@ -2,6 +2,7 @@ from typing import List, Tuple, Dict, Optional
 import math
 import random
 from core.models import Stroke
+from core.stroke_fonts import DEFAULT_FONT, get_stroke_font
 
 FONT_DICT: Dict[str, List[Dict]] = {
     # Buchstabe A-Z
@@ -669,7 +670,8 @@ class HandwritingStyle:
 class StrokeGenerator:
     def __init__(self, char_spacing: float = 0.5, word_spacing: float = 1.0,
                  line_height: float = 3.0, smooth_iterations: int = 2,
-                 seed: Optional[int] = None, enable_variants: bool = True):
+                 seed: Optional[int] = None, enable_variants: bool = True, font: str = DEFAULT_FONT):
+        self.font = get_stroke_font(font)
         self.char_spacing = char_spacing
         self.word_spacing = word_spacing
         self.line_height = line_height
@@ -707,14 +709,19 @@ class StrokeGenerator:
 
             # Sicherer Lookup ohne 'ß'.upper() -> 'SS' Zerstörung
             target_key = None
-            if char in FONT_DICT:
+            if self.font is not None:
+                if char in self.font.glyphs:
+                    target_key = char
+            elif char in FONT_DICT:
                 target_key = char
             elif char.upper() in FONT_DICT:
                 target_key = char.upper()
 
             if target_key:
                 # Prüfen auf Glyphen-Varianten
-                if self.enable_variants and target_key in GLYPH_VARIANTS:
+                if self.font is not None:
+                    char_paths = self.font.paths(target_key)
+                elif self.enable_variants and target_key in GLYPH_VARIANTS:
                     variants = GLYPH_VARIANTS[target_key]
                     v_base_s = self.seed if self.seed is not None else 54321
                     v_rng = random.Random(v_base_s + char_counter * 313)
@@ -740,7 +747,7 @@ class StrokeGenerator:
                     last_point = offset_points[-1]
 
                 # Proportionales Spacing verwenden
-                adv = self._get_char_width(target_key)
+                adv = self.font.advance(target_key) if self.font is not None else self._get_char_width(target_key)
                 current_x += adv + self.char_spacing
             else:
                 import sys

@@ -3,13 +3,13 @@ let state = null, token = '', dirty = true, requestPending = false, serverAvaila
 let previewTimer, previewPending = false, previewRevision = 0, eventsKey = '';
 let previewGeometry = null, previewError = '', displayedJobId = null, jobSummary = null;
 let liveSpeedPending = false, liveSpeedTimer, liveSpeedRevision = 0;
-const editIds = ['text','paper','style','font','line','margin','pen','speed','pen-pause'];
+const editIds = ['text','paper','typeface','style','font','line','margin','pen','speed','pen-pause'];
 const numberIds = ['speed','font','line','margin','pen','pen-pause'];
 const penOperations = ['Stift hoch','Stift absenken','Stiftwert bestätigen und anheben'];
 const runOperations = ['Schreiben','Trockenlauf'];
 const serverDown = 'Steuerungsserver nicht erreichbar. Läuft das Terminal noch? Bei laufender Fahrt am Gerät prüfen.';
 const preferencesKey = 'vgx4.preferences.v1';
-const preferenceIds = ['text','paper','style','font','line','margin','pen','speed','pen-pause','show-travel','show-margins','show-position'];
+const preferenceIds = ['text','paper','typeface','style','font','line','margin','pen','speed','pen-pause','show-travel','show-margins','show-position'];
 let preferences = {};
 
 const stepValue = () => Number(document.querySelector('input[name=step]:checked').value);
@@ -84,7 +84,7 @@ async function api(path, body) {
 }
 function payload() {
   const [width,height]=$('paper').value.split(',').map(Number);
-  return {text:$('text').value,width,height,style:$('style').value,font_height:Number($('font').value),line_height:Number($('line').value),margin:Number($('margin').value),speed_percent:Number($('speed').value),pen_s:Number($('pen').value),pen_pause:Number($('pen-pause').value)};
+  return {text:$('text').value,width,height,typeface:$('typeface').value,style:$('style').value,font_height:Number($('font').value),line_height:Number($('line').value),margin:Number($('margin').value),speed_percent:Number($('speed').value),pen_s:Number($('pen').value),pen_pause:Number($('pen-pause').value)};
 }
 // Catch half-typed or out-of-range numbers locally instead of flashing server errors while typing.
 function inputProblem() {

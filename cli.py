@@ -26,7 +26,8 @@ def generate_humanized_strokes_and_feeds(
     max_accel=300.0,
     seed=None,
     char_spacing=0.4,
-    word_spacing=1.1
+    word_spacing=1.1,
+    font='handwriting'
 ):
     # Parameter validation preflight
     for name, val in [
@@ -62,7 +63,7 @@ def generate_humanized_strokes_and_feeds(
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise ValueError(f"seed must be an integer or None (got {seed})")
 
-    generator = StrokeGenerator(char_spacing=char_spacing, word_spacing=word_spacing, line_height=line_height, seed=seed)
+    generator = StrokeGenerator(char_spacing=char_spacing, word_spacing=word_spacing, line_height=line_height, seed=seed, font=font)
     lines = text.split('\n')
 
     # 1. Stroke-Generierung der Zeilen

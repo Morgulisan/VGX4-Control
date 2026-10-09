@@ -310,6 +310,26 @@ class PreviewSpeedTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.prepare(c,pen_pause=value)
 
+    def test_every_typeface_writes_german_text_as_single_lines(self):
+        from vgx4_profile import VGX4Settings, render_handwriting, create_gcode, wrap_lines
+        from core.stroke_fonts import FONT_CHOICES
+        self.assertGreaterEqual(len(FONT_CHOICES),7)
+        for key,_ in FONT_CHOICES:
+            cfg=VGX4Settings(page_width=210,page_height=148,font_height=5.8,line_height=9,typeface=key)
+            with contextlib.redirect_stdout(io.StringIO()):
+                strokes=render_handwriting('Hallo Welt, schöne Grüße! ÄÖÜ äöü ß 0123 (a+b)=c?',cfg)
+                create_gcode(strokes,cfg)  # validates feeds, bounds and pen sequence
+                self.assertGreaterEqual(len(render_handwriting('i',cfg)),2,key)  # stem + dot (+ serifs)
+            self.assertTrue(wrap_lines('Ein Stift zieht sacht auf dem Papier.',85,5.8,key))
+        with self.assertRaises(ValueError):
+            VGX4Settings(typeface='nope')
+
+        with tempfile.TemporaryDirectory(dir=Path(__file__).resolve().parent.parent) as tmp:
+            c=Controller(tmp)
+            self.assertEqual(self.prepare(c,typeface='cursive')['job']['settings']['typeface'],'cursive')
+            with self.assertRaises(ValueError):
+                self.prepare(c,typeface='nope')
+
     def test_touching_strokes_share_one_pen_down_in_every_style(self):
         from vgx4_profile import VGX4Settings, render_handwriting
         for style in ('natural','neat','loose'):

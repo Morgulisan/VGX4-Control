@@ -13,6 +13,7 @@ from typing import Sequence
 
 from cli import generate_humanized_strokes_and_feeds
 from core.stroke_generator import FONT_DICT, GLYPH_METRICS
+from core.stroke_fonts import DEFAULT_FONT, FONT_CHOICES, get_stroke_font
 from humanizer.velocity_profile import compute_dynamic_feedrate
 
 XY_WORKSPACE = (310.0, 256.0)  # hardware manual, mm
@@ -38,6 +39,7 @@ class VGX4Settings:
     font_height: float = 5.2
     line_height: float = 9.3
     style: str = 'natural'
+    typeface: str = DEFAULT_FONT
     seed: int = 42
     pen_down_s: int = 905    # Papierkontakt im realen Schreibtest bestaetigt (S1000 = Maximum)
     pen_settle_ms: int = 450
@@ -54,6 +56,8 @@ class VGX4Settings:
             raise ValueError('Geschwindigkeit muss zwischen 25 und 300 Prozent liegen')
         if self.style not in ('natural','neat','loose'):
             raise ValueError('Unbekannter Schriftstil.')
+        if not isinstance(self.typeface,str) or self.typeface not in dict(FONT_CHOICES):
+            raise ValueError('Unbekannte Schriftart.')
         if not (0 < self.page_width <= XY_WORKSPACE[0] and 0 < self.page_height <= XY_WORKSPACE[1]):
             raise ValueError(f'Papier größer als der Arbeitsbereich {XY_WORKSPACE[0]:g} × {XY_WORKSPACE[1]:g} mm.')
         if self.margin_x < 0 or self.margin_x * 2 >= self.page_width:
@@ -82,16 +86,19 @@ STYLES = {
 }
 
 
-def text_width(text: str, font_height: float) -> float:
+def text_width(text: str, font_height: float, typeface: str = DEFAULT_FONT) -> float:
     """Width in mm from the stroke font's own glyph advances; within ~2 % of the rendered ink."""
+    font = get_stroke_font(typeface)
     def advance(c):
+        if font is not None:
+            return font.word_spacing if c == ' ' else font.advance(c) + font.char_spacing
         if c == ' ':
             return WORD_SPACING
         return GLYPH_METRICS.get(c if c in FONT_DICT else c.upper(), .85) + CHAR_SPACING
     return sum(map(advance, text)) * font_height / 2
 
 
-def wrap_lines(text: str, width_mm: float, font_height: float) -> str:
+def wrap_lines(text: str, width_mm: float, font_height: float, typeface: str = DEFAULT_FONT) -> str:
     """Greedy word wrap by measured width. Check geometric extents *after* rendering."""
     out=[]
     for paragraph in text.replace('\r\n','\n').replace('\r','\n').split('\n'):
@@ -99,11 +106,11 @@ def wrap_lines(text: str, width_mm: float, font_height: float) -> str:
             out.append('');continue
         s=''
         for word in paragraph.split():
-            if text_width(word,font_height)>width_mm:
+            if text_width(word,font_height,typeface)>width_mm:
                 raise ValueError(f'Das Wort „{word[:35]}“ ist zu lang für eine Zeile. '
                                  'Schrifthöhe oder Rand verkleinern oder breiteres Papier wählen.')
             proposal=word if not s else s+' '+word
-            if text_width(proposal,font_height)>width_mm and s:
+            if text_width(proposal,font_height,typeface)>width_mm and s:
                 out.append(s);s=word
             else:s=proposal
         out.append(s)
@@ -194,16 +201,21 @@ def render_handwriting(text: str, cfg: VGX4Settings):
     if bad: raise ValueError('Diese Zeichen kann die Schrift nicht schreiben: '+' '.join(bad)+' – bitte entfernen oder ersetzen.')
     if '\t' in text:text=text.replace('\t','    ')
     style=STYLES[cfg.style]
+    font=get_stroke_font(cfg.typeface)
+    if font is not None:
+        text=text.replace('ß','ss')  # the line fonts have no Eszett
+    char_spacing=CHAR_SPACING if font is None else font.char_spacing
+    word_spacing=WORD_SPACING if font is None else font.word_spacing
     right=cfg.page_width-cfg.margin_x
     width=right-cfg.margin_x
     # Slant and jitter can push a full line slightly past its measured width; rewrap narrower if so.
     for _ in range(4):
         strokes, feeds,_=generate_humanized_strokes_and_feeds(
-            text=wrap_lines(text,width,cfg.font_height), jitter=style['jitter'],drift=style['drift'],scale=cfg.font_height/2,
+            text=wrap_lines(text,width,cfg.font_height,cfg.typeface), jitter=style['jitter'],drift=style['drift'],scale=cfg.font_height/2,
             line_height=cfg.line_height/(cfg.font_height/2), origin_x=cfg.margin_x,origin_y=2.0,
             page_width=cfg.page_width,page_height=100000,
             min_feed=style['min_feed'],max_feed=style['max_feed'],
-            max_accel=220,seed=cfg.seed, char_spacing=CHAR_SPACING, word_spacing=WORD_SPACING)
+            max_accel=220,seed=cfg.seed, char_spacing=char_spacing, word_spacing=word_spacing, font=cfg.typeface)
         if not strokes: raise ValueError('Der Text enthält keine schreibbaren Zeichen.')
         overshoot=max(x for s in strokes for x,_ in s)-right
         if overshoot<=0:
