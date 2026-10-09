@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 let state = null, token = '', dirty = true, requestPending = false;
 let previewTimer, previewPending = false, previewRevision = 0, eventsKey = "";
-let previewGeometry = null;
+let previewGeometry = null, previewError = '', displayedJobId = null, serverAvailable = false;
 const editIds = ['text','paper','style','font','line','margin','pen','speed'];
 const preferencesKey = 'vgx4.preferences.v1';
 const preferenceIds = ['paper','style','font','line','margin','pen','speed','step','show-travel','show-margins','show-position'];
@@ -39,18 +39,47 @@ preferenceIds.forEach(id=>{
 function setText(id, value) { const el=$(id); if(el.textContent!==value) el.textContent=value; }
 function error(message) { setText('error',message); $('error').hidden=!message; }
 async function api(path, body) {
-  const response=await fetch(path, body===undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','X-Control-Token':token},body:JSON.stringify(body)});
+  const response=await fetch(path, body===undefined ? {signal:AbortSignal.timeout(15000)} : {signal:AbortSignal.timeout(15000),method:'POST',headers:{'Content-Type':'application/json','X-Control-Token':token},body:JSON.stringify(body)});
   const data=await response.json();
-  if(!response.ok) throw new Error(data.error || 'Anfrage fehlgeschlagen');
+  if(!response.ok) {
+    let message=data.error || 'Anfrage fehlgeschlagen';
+    if(message.startsWith('Text does not fit:')) message='Der Text passt mit diesen Einstellungen nicht auf das Papier. Zeilenabstand, Schriftgröße oder Rand verkleinern, Leerzeilen entfernen oder größeres Papier wählen.';
+    throw new Error(message);
+  }
   return data;
 }
 function payload() {
   const [width,height]=$('paper').value.split(',').map(Number);
   return {text:$('text').value,width,height,style:$('style').value,font_height:Number($('font').value),line_height:Number($('line').value),margin:Number($('margin').value),speed_percent:Number($('speed').value),pen_s:Number($('pen').value)};
 }
+function writeBlockers(s, flags) {
+  const reasons=[];
+  if(!flags.serverAvailable) reasons.push('Keine Verbindung zum Steuerungsserver.');
+  if(!s) return reasons.length?reasons:['Roboterstatus wird geladen.'];
+  if(!s.connected) reasons.push('Roboter verbinden (Schritt 01).');
+  if(s.busy) reasons.push('Vorgang läuft: '+(s.operation||'Roboter beschäftigt')+(s.paused?' (pausiert – fortsetzen oder abbrechen).':'.'));
+  if(flags.requestPending) reasons.push('Steuerungsbefehl wird bestätigt.');
+  if(flags.previewPending) reasons.push('Dokumentvorschau wird erstellt.');
+  else if(flags.previewError) reasons.push('Vorschau nicht gültig: '+flags.previewError);
+  else if(flags.dirty||!s.job||!flags.displayedJobId) reasons.push('Aktuelle Dokumentvorschau erstellen.');
+  else if(s.job.id!==flags.displayedJobId) reasons.push('Auftrag in einem anderen Tab geändert. Hier „Vorschau erstellen“ drücken.');
+  if(!s.origin) reasons.push('Startpunkt setzen: „Hier ist oben links · 0 / 0“ (Schritt 02).');
+  if(!flags.area) reasons.push('„Ich bin am Gerät. Papier und Fahrbereich …“ ankreuzen.');
+  if(!(flags.contact||(s.job&&s.calibrated_s===s.job.settings.pen_down_s))) reasons.push('Papierkontakt für den eingestellten Stiftwert bestätigen.');
+  return reasons;
+}
+function renderWriteReadiness() {
+  const reasons=writeBlockers(state,{serverAvailable,requestPending,previewPending,previewError,dirty,displayedJobId,area:$('area').checked,contact:$('contact-ok').checked});
+  $('write').disabled=reasons.length>0;
+  const message=reasons.length?'Zum Schreiben fehlt:\n• '+reasons.join('\n• '):'Bereit zum Schreiben · Trockenlauf ist optional.';
+  setText('write-readiness',message);
+  $('write-readiness').classList.toggle('blocked',reasons.length>0);
+  $('write').title=message;
+}
 function render() {
+  renderWriteReadiness();
   if(!state) return;
-  const idle=state.connected&&!state.busy&&!requestPending&&!previewPending, validJob=state.job&&!dirty&&!previewPending;
+  const idle=state.connected&&!state.busy&&!requestPending&&!previewPending, validJob=state.job&&state.job.id===displayedJobId&&!dirty&&!previewPending&&!previewError;
   setText('connection',state.connected ? (state.busy ? 'Verbunden · aktiv':'Verbunden · bereit') : 'Nicht verbunden');
   $('dot').classList.toggle('on',state.connected);
   setText('mode',state.demo?'SIMULATION':'LOKAL'); $('mode').classList.toggle('demo',state.demo);
@@ -68,9 +97,6 @@ function render() {
   for(const id of editIds) $(id).disabled=editingLocked;
   updatePenPosition();
   $('dryrun').disabled=!(idle&&validJob&&state.origin&&$('area').checked);
-  const contact=validJob&&(state.calibrated_s===state.job.settings.pen_down_s||$('contact-ok').checked);
-  $('write').disabled=!(idle&&validJob&&state.origin&&$('area').checked&&contact);
-  setText('write-readiness',!state.connected?'Zum Schreiben zuerst verbinden.':state.busy?'Vorgang läuft.':!validJob?'Auf aktuelle Vorschau warten.':!state.origin?'Startpunkt oben links setzen.':!$('area').checked?'Anwesenheit und freien Fahrbereich bestätigen.':!contact?'Papierkontakt des eingestellten Stiftwerts bestätigen.':'Bereit zum Schreiben · Trockenlauf ist optional.');
   $('live-speed').disabled=!(state.connected&&state.busy&&['Schreiben','Trockenlauf'].includes(state.operation));
   if(document.activeElement!==$('live-speed')&&!liveSpeedPending) { $('live-speed').value=state.live_speed; setText('live-speed-value',state.live_speed+' %'); }
   $('dry-ok').disabled=!validJob||!state.dry_completed||state.busy;
@@ -93,8 +119,8 @@ async function poll() {
   try {
     const next=await api('/api/state');
     if(next.error && next.error!==state?.error) error(next.error);
-    state=next; token=next.token; render();
-  } catch(e) {error('Server nicht erreichbar. Bei laufender Fahrt am Gerät prüfen.');}
+    serverAvailable=true; state=next; token=next.token; render();
+  } catch(e) {serverAvailable=false; renderWriteReadiness(); error('Server nicht erreichbar. Bei laufender Fahrt am Gerät prüfen.');}
 }
 async function act(name, data={}) {
   requestPending=true; render(); error('');
@@ -122,8 +148,8 @@ $('calibrate').onclick=()=>act('calibrate',{confirmed:true});
 document.querySelectorAll('[data-axis]').forEach(b=>b.onclick=()=>{$('dry-ok').checked=false;act('jog',{axis:b.dataset.axis,distance:Number(b.dataset.sign)*Number($('step').value)});});
 $('stop').onclick=()=>{$('dry-ok').checked=false;act('stop');};
 $('pause').onclick=()=>act(state.paused?'resume':'pause');
-$('dryrun').onclick=()=>{$('dry-ok').checked=false;act('dryrun',{job_id:state.job.id,area_confirmed:$('area').checked});};
-$('write').onclick=()=>act('write',{job_id:state.job.id,area_confirmed:$('area').checked,contact_confirmed:$('contact-ok').checked});
+$('dryrun').onclick=()=>{$('dry-ok').checked=false;act('dryrun',{job_id:displayedJobId,area_confirmed:$('area').checked});};
+$('write').onclick=()=>act('write',{job_id:displayedJobId,area_confirmed:$('area').checked,contact_confirmed:$('contact-ok').checked});
 async function preparePreview() {
   if (previewPending) return;
   if (state?.busy || requestPending) {
@@ -132,7 +158,7 @@ async function preparePreview() {
   }
   clearTimeout(previewTimer);
   const revision=previewRevision, requested=payload();
-  previewPending=true;render();error('');
+  previewPending=true;previewError='';render();error('');
   try {
     const result=await api('/api/prepare',requested);
     if(revision!==previewRevision) return;
@@ -145,6 +171,7 @@ async function preparePreview() {
     $('preview').hidden=false;
     $('document-sheet').hidden=false;
     previewGeometry=result.geometry;
+    displayedJobId=result.job.id;
     updatePreviewOverlays();
     $('empty-preview').hidden=true;
     dirty=false;$('dry-ok').checked=false;
@@ -153,7 +180,7 @@ async function preparePreview() {
     setText('paper-size',result.job.settings.page_width+' × '+result.job.settings.page_height+' mm');
     await poll();
   } catch(e){
-    if(revision===previewRevision) error(e.message);
+    if(revision===previewRevision) { previewError=e.message; error(e.message); setText('bounds','Vorschau ungültig: '+e.message); }
   } finally {
     previewPending=false;render();
     // An edit made during the request needs its own preview; never approve stale input.
@@ -166,6 +193,7 @@ async function preparePreview() {
 $('prepare').onclick=preparePreview;
 editIds.forEach(id=>$(id).addEventListener('input',()=>{
   if(id==='pen') $('contact-ok').checked=false;
+  previewError='';
   previewRevision++;
   dirty=true;$('dry-ok').checked=false;
   setText('char-count',$('text').value.length+' / 1200');
@@ -214,4 +242,5 @@ $('live-speed').oninput=()=>{
 };
 // Never silently resume a saved job after reload; require a new preview.
 setText('char-count',$('text').value.length+' / 1200');
+renderWriteReadiness();
 (async()=>{await poll();await ports();await preparePreview();setInterval(poll,200);})();
